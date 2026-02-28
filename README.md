@@ -17,3 +17,15 @@ It is designed for a common problem: permission prompts are tedious, but running
 - Mounts only the project directory and a minimal set of agent-related config/history/auth paths from `$HOME`.
 - Runs container processes as your mapped host user (UID/GID), not as root.
 - Forwards SSH agent and Docker socket when available.
+- Builds a local container image with deterministic tagging and voom-style versioning.
+
+## Versioning note (voom)
+
+This repository includes `voom-like-version.sh` as a local copy/adaptation of:
+
+- `https://github.com/Viasat/voom-util/blob/master/voom-like-version.sh`
+
+voom-util license:
+
+- Eclipse Public License 2.0 (EPL-2.0)
+- `https://github.com/Viasat/voom-util/blob/master/LICENSE`
