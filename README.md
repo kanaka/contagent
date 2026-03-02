@@ -125,3 +125,8 @@ voom-util license:
 
 - Eclipse Public License 2.0 (EPL-2.0)
 - `https://github.com/Viasat/voom-util/blob/master/LICENSE`
+
+## License
+
+- Project license: MIT (`LICENSE`).
+- `voom-like-version.sh` remains under its upstream EPL-2.0 terms.
