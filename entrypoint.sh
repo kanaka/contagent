@@ -50,9 +50,10 @@ fi
 # Keep host uid/gid semantics exact; prefer host primary group name for that gid.
 if getent group "$CONTAGENT_GID" >/dev/null 2>&1; then
   current_group=$(getent group "$CONTAGENT_GID" | cut -d: -f1)
-  [ "$current_group" = "$CONTAGENT_GROUPNAME" ] || {
+  if [ "$current_group" != "$CONTAGENT_GROUPNAME" ] && \
+    ! getent group "$CONTAGENT_GROUPNAME" >/dev/null 2>&1; then
     groupmod -n "$CONTAGENT_GROUPNAME" "$current_group"
-  }
+  fi
 else
   groupadd -g "$CONTAGENT_GID" "$CONTAGENT_GROUPNAME"
 fi
@@ -66,7 +67,7 @@ if getent passwd "$CONTAGENT_USERNAME" >/dev/null 2>&1; then
 elif [ -n "$uid_user" ]; then
   usermod -l "$CONTAGENT_USERNAME" "$uid_user"
 else
-  useradd -m -u "$CONTAGENT_UID" -g "$CONTAGENT_GID" \
+  useradd -M -K UID_MIN=0 -u "$CONTAGENT_UID" -g "$CONTAGENT_GID" \
     -d "$CONTAGENT_HOME" -s /bin/bash "$CONTAGENT_USERNAME"
 fi
 
@@ -76,9 +77,12 @@ usermod -g "$CONTAGENT_GID" -d "$CONTAGENT_HOME" -s /bin/bash \
 # usermod -aG root "$CONTAGENT_USERNAME" >/dev/null 2>&1 || true
 add_extra_groups
 
-# Best-effort home fixup: prioritize forward progress if host paths resist chown.
+sock=${DOCKER_HOST#unix://}
+[ -n "${DOCKER_HOST:-}" ] && [ "$sock" != "$DOCKER_HOST" ] && [ -S "$sock" ] && chmod 666 "$sock" >/dev/null 2>&1 || true
+
+# Best-effort home dir fixup
 mkdir -p "$CONTAGENT_HOME"
-chown -R "$CONTAGENT_UID:$CONTAGENT_GID" "$CONTAGENT_HOME" >/dev/null 2>&1 || true
+chown "$CONTAGENT_UID:$CONTAGENT_GID" "$CONTAGENT_HOME" >/dev/null 2>&1 || true
 getent passwd "$CONTAGENT_USERNAME" >/dev/null 2>&1 || {
   die "mapped user $CONTAGENT_USERNAME does not exist after setup"
 }

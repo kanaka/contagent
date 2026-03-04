@@ -30,10 +30,6 @@ append_gid_unique() {
   extra_group_gids+=("$gid")
 }
 
-group_name_for_gid() {
-  getent group "$1" | cut -d: -f1 || true
-}
-
 need_cmd docker
 # Local-image-first by design; fail early instead of pulling implicitly.
 docker image inspect "$CONTAGENT_IMAGE" >/dev/null 2>&1 || {
@@ -90,9 +86,9 @@ if [ -n "${CONTAGENT_EXTRA_GROUP_GIDS:-}" ]; then
 fi
 
 docker_sock_candidates=(
-  "/var/run/docker.sock"
   "$host_home/.docker/run/docker.sock"
   "$host_home/.colima/default/docker.sock"
+  "/var/run/docker.sock"
 )
 
 mounted_docker_sock=0
@@ -101,10 +97,6 @@ for sock in "${docker_sock_candidates[@]}"; do
 
   # Bind host daemon endpoint directly; no in-container daemon required.
   docker_args+=(--volume "$sock:$sock" --env "DOCKER_HOST=unix://$sock")
-  docker_sock_gid=$(stat -c '%g' "$sock" 2>/dev/null || true)
-
-  # Capture socket gid so mapped user can talk to docker without running as root.
-  [[ "$docker_sock_gid" =~ ^[0-9]+$ ]] && append_gid_unique "$docker_sock_gid"
   mounted_docker_sock=1
   break
 done
@@ -125,10 +117,7 @@ fi
 if [ "${#extra_group_gids[@]}" -gt 0 ]; then
   extra_group_specs=()
   for gid in "${extra_group_gids[@]}"; do
-    # Carry host group name + gid so in-container names stay meaningful.
-    group_name=$(group_name_for_gid "$gid")
-    [ -n "$group_name" ] || group_name="gid"
-    extra_group_specs+=("$group_name:$gid")
+    extra_group_specs+=("g$gid:$gid")
   done
   docker_args+=(
     --env "CONTAGENT_EXTRA_GROUP_SPECS=$(IFS=,; printf '%s' "${extra_group_specs[*]}")"
