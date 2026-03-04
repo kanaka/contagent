@@ -2,6 +2,7 @@ FROM node:24-slim
 
 ARG CLAUDE_CODE_VERSION
 ARG OPENCODE_VERSION
+ARG PI_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -41,7 +42,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     docker-buildx-plugin \
     && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "opencode-ai@${OPENCODE_VERSION}" \
+RUN npm install -g \
+    "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+    "opencode-ai@${OPENCODE_VERSION}" \
+    "@mariozechner/pi-coding-agent@${PI_VERSION}" \
     && npm cache clean --force
 
 RUN if [ -x /usr/bin/fdfind ] && [ ! -e /usr/local/bin/fd ]; then ln -s /usr/bin/fdfind /usr/local/bin/fd; fi

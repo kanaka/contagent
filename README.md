@@ -14,7 +14,7 @@ keeping filesystem and credential exposure narrow and intentional.
 
 ## What it provides
 
-- Runtime image with common CLI tools plus Claude Code and OpenCode.
+- Runtime image with common CLI tools plus Claude Code, OpenCode, and Pi.
 - Host identity mapping (username, primary group name, UID, GID, home).
 - Project mounted at the same absolute path inside the container.
 - Minimal allowlist mounts for agent config/cache/state paths.
@@ -71,6 +71,7 @@ Build-time environment:
 - `CONTAGENT_IMAGE_NAME` (default: `contagent`)
 - `CLAUDE_CODE_VERSION` (default: `latest`)
 - `OPENCODE_VERSION` (default: `latest`)
+- `PI_VERSION` (default: `latest`)
 
 Runtime environment:
 
@@ -80,7 +81,7 @@ Runtime environment:
 Examples:
 
 ```bash
-CLAUDE_CODE_VERSION=1.0.59 OPENCODE_VERSION=0.5.19 ./build-contagent.sh
+CLAUDE_CODE_VERSION=1.0.59 OPENCODE_VERSION=0.5.19 PI_VERSION=0.56.0 ./build-contagent.sh
 CONTAGENT_IMAGE=contagent:20260302_101530-gabc123 ./contagent.sh
 CONTAGENT_EXTRA_GROUP_GIDS=970 ./contagent.sh docker ps
 ```

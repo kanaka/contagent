@@ -58,6 +58,7 @@ docker_args+=(
 
 mount_allowlist=(
   "$host_home/.claude"
+  "$host_home/.pi"
   "$host_home/.config/opencode"
   "$host_home/.local/share/opencode"
   "$host_home/.local/state/opencode"

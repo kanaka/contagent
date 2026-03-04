@@ -45,6 +45,8 @@ echo "- claude cli availability"
 "$contagent_sh" bash -lc 'command -v claude >/dev/null && claude --version || true'
 echo "- opencode cli availability"
 "$contagent_sh" bash -lc 'command -v opencode >/dev/null && opencode --version || true'
+echo "- pi cli availability"
+"$contagent_sh" bash -lc 'command -v pi >/dev/null && pi --version || true'
 
 if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ]; then
   echo "- ssh agent forwarding"
