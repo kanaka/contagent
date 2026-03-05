@@ -9,6 +9,24 @@ contagent_sh="$script_dir/contagent.sh"
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
+run_step() {
+  local name=$1
+  shift
+
+  printf '[TEST] %s\n' "$name"
+  if "$@"; then
+    printf '[PASS] %s\n' "$name"
+  else
+    code=$?
+    printf '[FAIL] %s (exit %s)\n' "$name" "$code" >&2
+    exit "$code"
+  fi
+}
+
+run_in_contagent() {
+  "$contagent_sh" bash -lc "$1"
+}
+
 command -v docker >/dev/null 2>&1 || die "docker is required"
 docker image inspect "$CONTAGENT_IMAGE" >/dev/null 2>&1 || {
   die "image ${CONTAGENT_IMAGE} not found locally"
@@ -17,49 +35,32 @@ docker image inspect "$CONTAGENT_IMAGE" >/dev/null 2>&1 || {
 
 echo "Running smoke checks for ${CONTAGENT_IMAGE}"
 
-echo "- identity mapping"
-"$contagent_sh" bash -lc '
+run_step "identity mapping" run_in_contagent '
   test "$(id -u)" = "$CONTAGENT_UID"
   test "$(id -g)" = "$CONTAGENT_GID"
   test "$(id -un)" = "$CONTAGENT_USERNAME"
 '
 
-echo "- docker cli + host wiring"
-"$contagent_sh" bash -lc '
+run_step "docker cli available" run_in_contagent '
   command -v docker >/dev/null
   docker --version >/dev/null
-  [ -n "${DOCKER_HOST:-}" ]
 '
 
-echo "- docker socket group membership"
-"$contagent_sh" bash -lc '
-  sock=${DOCKER_HOST#unix://}
-  gid=$(stat -c "%g" "$sock")
-  for g in $(id -G); do
-    [ "$g" = "$gid" ] && exit 0
-  done
-  exit 1
-'
+run_step "docker daemon reachable" run_in_contagent 'docker ps >/dev/null'
 
-echo "- claude cli availability"
-"$contagent_sh" bash -lc 'command -v claude >/dev/null && claude --version || true'
-echo "- opencode cli availability"
-"$contagent_sh" bash -lc 'command -v opencode >/dev/null && opencode --version || true'
-echo "- pi cli availability"
-"$contagent_sh" bash -lc 'command -v pi >/dev/null && pi --version || true'
-echo "- codex cli availability"
-"$contagent_sh" bash -lc 'command -v codex >/dev/null && codex --version || true'
-echo "- copilot cli availability"
-"$contagent_sh" bash -lc 'command -v copilot >/dev/null && copilot --version || true'
+run_step "claude cli availability" run_in_contagent 'command -v claude >/dev/null && claude --version >/dev/null || true'
+run_step "opencode cli availability" run_in_contagent 'command -v opencode >/dev/null && opencode --version >/dev/null || true'
+run_step "pi cli availability" run_in_contagent 'command -v pi >/dev/null && pi --version >/dev/null || true'
+run_step "codex cli availability" run_in_contagent 'command -v codex >/dev/null && codex --version >/dev/null || true'
+run_step "copilot cli availability" run_in_contagent 'command -v copilot >/dev/null && copilot --version >/dev/null || true'
 
 if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ]; then
-  echo "- ssh agent forwarding"
-  "$contagent_sh" bash -lc '
+  run_step "ssh agent forwarding" run_in_contagent '
     [ -n "${SSH_AUTH_SOCK:-}" ]
     [ -S "$SSH_AUTH_SOCK" ]
   '
 else
-  echo "Skipping SSH forwarding check: host SSH agent socket unavailable"
+  echo "[SKIP] ssh agent forwarding (host SSH_AUTH_SOCK unavailable)"
 fi
 
 echo "Smoke checks completed"
