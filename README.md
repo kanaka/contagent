@@ -14,7 +14,7 @@ keeping filesystem and credential exposure narrow and intentional.
 
 ## What it provides
 
-- Runtime image with common CLI tools plus Claude Code, OpenCode, and Pi.
+- Runtime image with common CLI tools plus Claude Code, OpenCode, Pi, Codex, and Copilot.
 - Host identity mapping (username, primary group name, UID, GID, home).
 - Project mounted at the same absolute path inside the container.
 - Minimal allowlist mounts for agent config/cache/state paths.
@@ -37,7 +37,7 @@ Build:
 Build with feature flags:
 
 ```bash
-./build-contagent.sh --docker --pi --cc --opencode
+./build-contagent.sh --docker --pi --cc --opencode --codex --copilot
 ```
 
 Build composition is assembled from `Dockerfile-parts/` into
@@ -82,13 +82,17 @@ Build-time environment:
 - `CLAUDE_CODE_VERSION` (default: `latest`)
 - `OPENCODE_VERSION` (default: `latest`)
 - `PI_VERSION` (default: `latest`)
+- `CODEX_VERSION` (default: `latest`)
+- `COPILOT_VERSION` (default: `latest`)
 
 Build-time feature flags:
 
 - `--docker`
 - `--pi`
-- `--claude-code` (alias: `--cc`)
+- `--claude` (aliases: `--claude-code`, `--cc`, `--claudecode`)
 - `--opencode`
+- `--codex`
+- `--copilot` (aliases: `--github-copilot`, `--githubcopilot`)
 
 `CONTAGENT_FEATURES` sets the default enabled feature list; CLI flags add to it.
 
@@ -100,8 +104,8 @@ Runtime environment:
 Examples:
 
 ```bash
-CONTAGENT_FEATURES="docker pi" PI_VERSION=0.56.0 ./build-contagent.sh
-./build-contagent.sh --cc --opencode
+CONTAGENT_FEATURES="docker pi codex" PI_VERSION=0.56.0 ./build-contagent.sh
+./build-contagent.sh --cc --opencode --copilot
 CONTAGENT_IMAGE=contagent:20260302_101530-gabc123 ./contagent.sh
 CONTAGENT_EXTRA_GROUP_GIDS=970 ./contagent.sh docker ps
 ```

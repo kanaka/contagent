@@ -1,9 +1,5 @@
 FROM node:24-slim
 
-ARG CLAUDE_CODE_VERSION
-ARG OPENCODE_VERSION
-ARG PI_VERSION
-
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

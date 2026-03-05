@@ -1,0 +1,5 @@
+ARG COPILOT_VERSION
+
+RUN npm install -g \
+    "@github/copilot@${COPILOT_VERSION}" \
+    && npm cache clean --force

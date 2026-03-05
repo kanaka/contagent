@@ -8,7 +8,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: ./build-contagent.sh [--docker] [--pi] [--claude-code|--cc] [--opencode]
+Usage: ./build-contagent.sh [--docker] [--pi] [--claude|--claude-code|--cc|--claudecode] [--opencode] [--codex] [--copilot|--github-copilot|--githubcopilot]
 
 Features are enabled by CONTAGENT_FEATURES (default: "docker pi").
 CLI flags add features to that set.
@@ -20,6 +20,8 @@ CONTAGENT_FEATURES=${CONTAGENT_FEATURES:-"docker pi"}
 CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION:-latest}
 OPENCODE_VERSION=${OPENCODE_VERSION:-latest}
 PI_VERSION=${PI_VERSION:-latest}
+CODEX_VERSION=${CODEX_VERSION:-latest}
+COPILOT_VERSION=${COPILOT_VERSION:-latest}
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 parts_dir="$script_dir/Dockerfile-parts"
@@ -42,7 +44,7 @@ enable_feature() {
   local feature=$1
 
   case "$feature" in
-    docker|pi|claude-code|opencode) ;;
+    docker|pi|claude-code|opencode|codex|copilot) ;;
     *) die "unknown feature: $feature" ;;
   esac
   feature_enabled["$feature"]=1
@@ -57,8 +59,10 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --docker) enable_feature docker ;;
     --pi) enable_feature pi ;;
-    --claude-code|--cc) enable_feature claude-code ;;
+    --claude|--claude-code|--cc|--claudecode) enable_feature claude-code ;;
     --opencode) enable_feature opencode ;;
+    --codex) enable_feature codex ;;
+    --copilot|--github-copilot|--githubcopilot) enable_feature copilot ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -75,6 +79,8 @@ need_cmd jq
 claude_version="$CLAUDE_CODE_VERSION"
 opencode_version="$OPENCODE_VERSION"
 pi_version="$PI_VERSION"
+codex_version="$CODEX_VERSION"
+copilot_version="$COPILOT_VERSION"
 all_selected_latest=1
 
 if [ -n "${feature_enabled[claude-code]:-}" ]; then
@@ -92,8 +98,18 @@ if [ -n "${feature_enabled[pi]:-}" ]; then
   [ "$PI_VERSION" = "latest" ] || all_selected_latest=0
 fi
 
+if [ -n "${feature_enabled[codex]:-}" ]; then
+  codex_version=$(resolve_version "@openai/codex" "$CODEX_VERSION")
+  [ "$CODEX_VERSION" = "latest" ] || all_selected_latest=0
+fi
+
+if [ -n "${feature_enabled[copilot]:-}" ]; then
+  copilot_version=$(resolve_version "@github/copilot" "$COPILOT_VERSION")
+  [ "$COPILOT_VERSION" = "latest" ] || all_selected_latest=0
+fi
+
 cat "$parts_dir/base" > "$selected_dockerfile"
-for feature in docker claude-code opencode pi; do
+for feature in docker claude-code opencode pi codex copilot; do
   [ -n "${feature_enabled[$feature]:-}" ] || continue
   [ -f "$parts_dir/$feature" ] || die "missing Dockerfile part: $feature"
   printf '\n' >> "$selected_dockerfile"
@@ -104,13 +120,15 @@ voom_version=$(REPO_ROOT_VOOM=1 "$script_dir/voom-like-version.sh")
 image_ref="${CONTAGENT_IMAGE_NAME}:${voom_version}"
 
 echo "Building image with selected features:"
-for feature in docker claude-code opencode pi; do
+for feature in docker claude-code opencode pi codex copilot; do
   [ -n "${feature_enabled[$feature]:-}" ] && echo "  ${feature}"
 done
 echo "Resolved versions:"
 [ -n "${feature_enabled[claude-code]:-}" ] && echo "  claude-code=${claude_version}"
 [ -n "${feature_enabled[opencode]:-}" ] && echo "  opencode-ai=${opencode_version}"
 [ -n "${feature_enabled[pi]:-}" ] && echo "  pi-coding-agent=${pi_version}"
+[ -n "${feature_enabled[codex]:-}" ] && echo "  codex=${codex_version}"
+[ -n "${feature_enabled[copilot]:-}" ] && echo "  copilot=${copilot_version}"
 echo "Producing tags:"
 echo "  ${image_ref}"
 
@@ -118,6 +136,8 @@ docker build \
   --build-arg "CLAUDE_CODE_VERSION=${claude_version}" \
   --build-arg "OPENCODE_VERSION=${opencode_version}" \
   --build-arg "PI_VERSION=${pi_version}" \
+  --build-arg "CODEX_VERSION=${codex_version}" \
+  --build-arg "COPILOT_VERSION=${copilot_version}" \
   -t "$image_ref" \
   -f "$selected_dockerfile" \
   "$script_dir"
