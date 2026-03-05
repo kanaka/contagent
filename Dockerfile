@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     coreutils \
     curl \
+    file \
     fd-find \
     gnupg \
     git \
@@ -23,8 +24,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     python3-venv \
     ripgrep \
+    strace \
     sudo \
     tar \
+    tmux \
     tini \
     util-linux \
     unzip \
