@@ -1,0 +1,3 @@
+RUN npm install -g \
+    "opencode-ai@${OPENCODE_VERSION}" \
+    && npm cache clean --force

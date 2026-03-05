@@ -19,7 +19,7 @@ keeping filesystem and credential exposure narrow and intentional.
 - Project mounted at the same absolute path inside the container.
 - Minimal allowlist mounts for agent config/cache/state paths.
 - Optional extra supplementary groups by host GID.
-- Deterministic image tags from resolved CLI versions and voom-style git versioning.
+- Deterministic image tags from voom-style git versioning (`<voom>` and optional `latest`).
 
 ## Requirements
 
@@ -33,6 +33,15 @@ Build:
 ```bash
 ./build-contagent.sh
 ```
+
+Build with feature flags:
+
+```bash
+./build-contagent.sh --docker --pi --cc --opencode
+```
+
+Build composition is assembled from `Dockerfile-parts/` into
+`Dockerfile.selected` on each build (`base` is always included).
 
 Launch interactive shell in current project:
 
@@ -69,9 +78,19 @@ environment (`HOME`/`USER`) instead of dropping you into root context.
 Build-time environment:
 
 - `CONTAGENT_IMAGE_NAME` (default: `contagent`)
+- `CONTAGENT_FEATURES` (default: `docker pi`)
 - `CLAUDE_CODE_VERSION` (default: `latest`)
 - `OPENCODE_VERSION` (default: `latest`)
 - `PI_VERSION` (default: `latest`)
+
+Build-time feature flags:
+
+- `--docker`
+- `--pi`
+- `--claude-code` (alias: `--cc`)
+- `--opencode`
+
+`CONTAGENT_FEATURES` sets the default enabled feature list; CLI flags add to it.
 
 Runtime environment:
 
@@ -81,7 +100,8 @@ Runtime environment:
 Examples:
 
 ```bash
-CLAUDE_CODE_VERSION=1.0.59 OPENCODE_VERSION=0.5.19 PI_VERSION=0.56.0 ./build-contagent.sh
+CONTAGENT_FEATURES="docker pi" PI_VERSION=0.56.0 ./build-contagent.sh
+./build-contagent.sh --cc --opencode
 CONTAGENT_IMAGE=contagent:20260302_101530-gabc123 ./contagent.sh
 CONTAGENT_EXTRA_GROUP_GIDS=970 ./contagent.sh docker ps
 ```

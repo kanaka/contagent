@@ -1,0 +1,3 @@
+RUN npm install -g \
+    "@mariozechner/pi-coding-agent@${PI_VERSION}" \
+    && npm cache clean --force
