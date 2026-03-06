@@ -14,6 +14,12 @@ features:
       env: GO_VERSION
       default: "1.26.0"
 
+  - names: [rust]
+    path: Dockerfile-parts/rust
+    version:
+      env: RUST_VERSION
+      default: "1.89.0"
+
   - names: [claude, claude-code, cc, claudecode]
     path: Dockerfile-parts/claude-code
     version:

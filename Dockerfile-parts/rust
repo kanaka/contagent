@@ -1,0 +1,14 @@
+ARG RUST_VERSION
+
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo
+ENV PATH=/usr/local/cargo/bin:${PATH}
+
+RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain "${RUST_VERSION}" --profile minimal \
+    && chmod -R a+rX "${RUSTUP_HOME}" \
+    && chmod -R a+rwX "${CARGO_HOME}" \
+    && ln -sf /usr/local/cargo/bin/rustup /usr/local/bin/rustup \
+    && ln -sf /usr/local/cargo/bin/cargo /usr/local/bin/cargo \
+    && ln -sf /usr/local/cargo/bin/rustc /usr/local/bin/rustc \
+    && ln -sf /usr/local/cargo/bin/rustfmt /usr/local/bin/rustfmt \
+    && ln -sf /usr/local/cargo/bin/clippy-driver /usr/local/bin/clippy-driver
