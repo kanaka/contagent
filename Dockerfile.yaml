@@ -8,6 +8,12 @@ features:
   - names: [docker]
     path: Dockerfile-parts/docker
 
+  - names: [go, golang]
+    path: Dockerfile-parts/go
+    version:
+      env: GO_VERSION
+      default: "1.26.0"
+
   - names: [claude, claude-code, cc, claudecode]
     path: Dockerfile-parts/claude-code
     version:
