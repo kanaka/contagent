@@ -19,12 +19,13 @@ keeping filesystem and credential exposure narrow and intentional.
 - Project mounted at the same absolute path inside the container.
 - Minimal allowlist mounts for agent config/cache/state paths.
 - Optional extra supplementary groups by host GID.
-- Deterministic image tags from voom-style git versioning (`<voom>` and optional `latest`).
+- Deterministic image tags from voom-style git versioning (`<voom>` and `latest`).
 
 ## Requirements
 
 - Docker on host.
 - Bash 4+ for `contagent.sh` and `build-contagent.sh`.
+- `curl` and `jq` on host for resolving `latest` feature versions.
 
 ## Quick start
 
@@ -37,11 +38,12 @@ Build:
 Build with feature flags:
 
 ```bash
-./build-contagent.sh --docker --pi --cc --opencode --codex --copilot
+./build-contagent.sh --docker --pi --claude --opencode --codex --copilot
 ```
 
-Build composition is assembled from `Dockerfile-parts/` into
-`Dockerfile.selected` on each build (`base` is always included).
+Build composition is driven by `Dockerfile.yaml` and assembled from
+`Dockerfile-parts/` into `Dockerfile.selected` on each build (`base` is always included).
+Manifest parsing uses local `yq` when available, otherwise `mikefarah/yq` via Docker.
 
 Launch interactive shell in current project:
 
@@ -78,7 +80,7 @@ environment (`HOME`/`USER`) instead of dropping you into root context.
 Build-time environment:
 
 - `CONTAGENT_IMAGE_NAME` (default: `contagent`)
-- `CONTAGENT_FEATURES` (default: `docker pi`)
+- `CONTAGENT_FEATURES` (default: `pi`)
 - `CLAUDE_CODE_VERSION` (default: `latest`)
 - `OPENCODE_VERSION` (default: `latest`)
 - `PI_VERSION` (default: `latest`)
@@ -95,6 +97,7 @@ Build-time feature flags:
 - `--copilot` (aliases: `--github-copilot`, `--githubcopilot`)
 
 `CONTAGENT_FEATURES` sets the default enabled feature list; CLI flags add to it.
+Both accept any token listed in a feature's `names` array in `Dockerfile.yaml`.
 
 Runtime environment:
 
@@ -104,8 +107,8 @@ Runtime environment:
 Examples:
 
 ```bash
-CONTAGENT_FEATURES="docker pi codex" PI_VERSION=0.56.0 ./build-contagent.sh
-./build-contagent.sh --cc --opencode --copilot
+CONTAGENT_FEATURES="pi codex" PI_VERSION=0.56.0 ./build-contagent.sh
+./build-contagent.sh --claude --opencode --copilot
 CONTAGENT_IMAGE=contagent:20260302_101530-gabc123 ./contagent.sh
 CONTAGENT_EXTRA_GROUP_GIDS=970 ./contagent.sh docker ps
 ```

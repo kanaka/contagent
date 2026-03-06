@@ -1,0 +1,44 @@
+version: 1
+
+features:
+  - names: [base]
+    path: Dockerfile-parts/base
+    required: true
+
+  - names: [docker]
+    path: Dockerfile-parts/docker
+
+  - names: [claude, claude-code, cc, claudecode]
+    path: Dockerfile-parts/claude-code
+    version:
+      env: CLAUDE_CODE_VERSION
+      default: latest
+      resolve: curl -fsSL "https://registry.npmjs.org/@anthropic-ai/claude-code/latest" | jq -r .version
+
+  - names: [opencode]
+    path: Dockerfile-parts/opencode
+    version:
+      env: OPENCODE_VERSION
+      default: latest
+      resolve: curl -fsSL "https://registry.npmjs.org/opencode-ai/latest" | jq -r .version
+
+  - names: [pi, pi-agent]
+    path: Dockerfile-parts/pi
+    version:
+      env: PI_VERSION
+      default: latest
+      resolve: curl -fsSL "https://registry.npmjs.org/@mariozechner/pi-coding-agent/latest" | jq -r .version
+
+  - names: [codex]
+    path: Dockerfile-parts/codex
+    version:
+      env: CODEX_VERSION
+      default: latest
+      resolve: curl -fsSL "https://registry.npmjs.org/@openai/codex/latest" | jq -r .version
+
+  - names: [copilot, github-copilot, githubcopilot]
+    path: Dockerfile-parts/copilot
+    version:
+      env: COPILOT_VERSION
+      default: latest
+      resolve: curl -fsSL "https://registry.npmjs.org/@github/copilot/latest" | jq -r .version
