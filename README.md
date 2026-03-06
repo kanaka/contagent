@@ -1,4 +1,4 @@
-# contagent
+# contagent: quarantine your agents, not your workflow
 
 Contagent is a containerized runtime for coding agents on your local machine.
 
