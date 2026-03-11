@@ -61,6 +61,7 @@ mount_allowlist=(
   "$host_home/.codex"
   "$host_home/.copilot"
   "$host_home/.pi"
+  "$host_home/.supabase"
   "$host_home/.config/opencode"
   "$host_home/.local/share/opencode"
   "$host_home/.local/state/opencode"
