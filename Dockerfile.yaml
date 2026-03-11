@@ -8,6 +8,9 @@ features:
   - names: [docker]
     path: Dockerfile-parts/docker
 
+  - names: [psql, postgres, postgresql]
+    path: Dockerfile-parts/psql
+
   - names: [go, golang]
     path: Dockerfile-parts/go
     version:
