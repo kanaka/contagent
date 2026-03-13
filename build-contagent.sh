@@ -14,7 +14,7 @@ EOF
 }
 
 CONTAGENT_IMAGE_NAME=${CONTAGENT_IMAGE_NAME:-contagent}
-CONTAGENT_FEATURES=${CONTAGENT_FEATURES:-"pi"}
+CONTAGENT_FEATURES=${CONTAGENT_FEATURES:-}
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 manifest_file="$script_dir/Dockerfile.yaml"

@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fd-find \
     gnupg \
     git \
+    iproute2 \
     jq \
     less \
     openssh-client \
@@ -21,6 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     ripgrep \
     strace \
+    socat \
     sudo \
     tar \
     tmux \
