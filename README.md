@@ -38,7 +38,7 @@ Build:
 Build with feature flags:
 
 ```bash
-./build-contagent.sh --docker --psql --pi --claude --opencode --codex --copilot
+./build-contagent.sh --build --docker --psql --pi --claude --opencode --codex --copilot
 ```
 
 Build composition is driven by `Dockerfile.yaml` and assembled from
@@ -89,6 +89,7 @@ Build-time environment:
 
 Build-time feature flags:
 
+- `--build` (alias: `--build-tools`)
 - `--docker`
 - `--psql` (aliases: `--postgres`, `--postgresql`)
 - `--pi`

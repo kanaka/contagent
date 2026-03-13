@@ -5,6 +5,9 @@ features:
     path: Dockerfile-parts/base
     required: true
 
+  - names: [build, build-tools]
+    path: Dockerfile-parts/build
+
   - names: [docker]
     path: Dockerfile-parts/docker
 
