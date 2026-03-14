@@ -1,4 +1,9 @@
+ARG PSQL_VERSION=latest
+
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-    postgresql-client \
+    && if [ "$PSQL_VERSION" = latest ]; then \
+         apt-get install -y --no-install-recommends postgresql-client; \
+       else \
+         apt-get install -y --no-install-recommends "postgresql-client=$PSQL_VERSION"; \
+       fi \
     && rm -rf /var/lib/apt/lists/*
