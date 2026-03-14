@@ -10,6 +10,10 @@ features:
 
   - names: [docker, all, all-tools]
     path: Dockerfile-parts/docker
+    version:
+      env: DOCKER_VERSION
+      default: latest
+      resolve: arch=$(uname -m); case "$arch" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) arch=amd64 ;; esac; packages=$(curl -fsSL "https://download.docker.com/linux/debian/dists/bookworm/stable/binary-${arch}/Packages"); printf '%s\n' "$packages" | awk '/^Package:[[:space:]]docker-ce-cli$/{f=1;next} f&&/^Version:[[:space:]]/{print $2; exit}'
 
   - names: [gh, github, github-cli, githubcli, all, all-tools]
     path: Dockerfile-parts/gh
