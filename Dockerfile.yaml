@@ -11,6 +11,13 @@ features:
   - names: [docker]
     path: Dockerfile-parts/docker
 
+  - names: [gh, github, github-cli, githubcli]
+    path: Dockerfile-parts/gh
+    version:
+      env: GH_VERSION
+      default: latest
+      resolve: curl -fsSL "https://api.github.com/repos/cli/cli/releases/latest" | jq -r '.tag_name | ltrimstr("v")'
+
   - names: [psql, postgres, postgresql]
     path: Dockerfile-parts/psql
 
