@@ -1,67 +1,67 @@
 version: 1
 
 features:
-  - names: [base]
+  - names: [base, all, all-tools]
     path: Dockerfile-parts/base
     required: true
 
-  - names: [build, build-tools]
+  - names: [build, build-tools, all, all-tools]
     path: Dockerfile-parts/build
 
-  - names: [docker]
+  - names: [docker, all, all-tools]
     path: Dockerfile-parts/docker
 
-  - names: [gh, github, github-cli, githubcli]
+  - names: [gh, github, github-cli, githubcli, all, all-tools]
     path: Dockerfile-parts/gh
     version:
       env: GH_VERSION
       default: latest
       resolve: curl -fsSL "https://api.github.com/repos/cli/cli/releases/latest" | jq -r '.tag_name | ltrimstr("v")'
 
-  - names: [psql, postgres, postgresql]
+  - names: [psql, postgres, postgresql, all, all-tools]
     path: Dockerfile-parts/psql
 
-  - names: [go, golang]
+  - names: [go, golang, all, all-tools]
     path: Dockerfile-parts/go
     version:
       env: GO_VERSION
       default: "1.26.0"
 
-  - names: [rust]
+  - names: [rust, all, all-tools]
     path: Dockerfile-parts/rust
     version:
       env: RUST_VERSION
       default: "1.89.0"
 
-  - names: [claude, claude-code, cc, claudecode]
+  - names: [claude, claude-code, cc, claudecode, all, all-agents]
     path: Dockerfile-parts/claude-code
     version:
       env: CLAUDE_CODE_VERSION
       default: latest
       resolve: curl -fsSL "https://registry.npmjs.org/@anthropic-ai/claude-code/latest" | jq -r .version
 
-  - names: [opencode]
+  - names: [opencode, all, all-agents]
     path: Dockerfile-parts/opencode
     version:
       env: OPENCODE_VERSION
       default: latest
       resolve: curl -fsSL "https://registry.npmjs.org/opencode-ai/latest" | jq -r .version
 
-  - names: [pi, pi-agent]
+  - names: [pi, pi-agent, all, all-agents]
     path: Dockerfile-parts/pi
     version:
       env: PI_VERSION
       default: latest
       resolve: curl -fsSL "https://registry.npmjs.org/@mariozechner/pi-coding-agent/latest" | jq -r .version
 
-  - names: [codex]
+  - names: [codex, all, all-agents]
     path: Dockerfile-parts/codex
     version:
       env: CODEX_VERSION
       default: latest
       resolve: curl -fsSL "https://registry.npmjs.org/@openai/codex/latest" | jq -r .version
 
-  - names: [copilot, github-copilot, githubcopilot]
+  - names: [copilot, github-copilot, githubcopilot, all, all-agents]
     path: Dockerfile-parts/copilot
     version:
       env: COPILOT_VERSION

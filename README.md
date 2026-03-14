@@ -99,6 +99,9 @@ Build-time feature flags:
 - `--opencode`
 - `--codex`
 - `--copilot` (aliases: `--github-copilot`, `--githubcopilot`)
+- `--all-tools` (all non-agent tool features)
+- `--all-agents` (all agent features)
+- `--all` (all tool + agent features)
 
 `CONTAGENT_FEATURES` sets the default enabled feature list; CLI flags add to it.
 Both accept any token listed in a feature's `names` array in `Dockerfile.yaml`.
