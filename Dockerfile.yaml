@@ -7,6 +7,10 @@ features:
 
   - names: [build, build-tools, all, all-tools]
     path: Dockerfile-parts/build
+    version:
+      env: BUILD_ESSENTIAL_VERSION
+      default: latest
+      resolve: page=$(curl -fsSL "https://packages.debian.org/bookworm/build-essential"); printf '%s\n' "$page" | grep -oE 'Package:[[:space:]]build-essential \([^)]+' | sed -E 's/.*\((.*)$/\1/'
 
   - names: [docker, all, all-tools]
     path: Dockerfile-parts/docker
