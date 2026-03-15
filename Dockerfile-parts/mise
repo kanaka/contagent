@@ -1,0 +1,11 @@
+ARG MISE_VERSION=latest
+
+RUN arch=$(dpkg --print-architecture) \
+    && case "$arch" in \
+      amd64) mise_arch=x64 ;; \
+      arm64) mise_arch=arm64 ;; \
+      *) echo "unsupported architecture for mise: $arch" >&2; exit 1 ;; \
+    esac \
+    && version="$MISE_VERSION" \
+    && curl -fsSL "https://github.com/jdx/mise/releases/download/v${version}/mise-v${version}-linux-${mise_arch}" -o /usr/local/bin/mise \
+    && chmod 0755 /usr/local/bin/mise

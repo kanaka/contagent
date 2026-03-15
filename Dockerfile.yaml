@@ -26,6 +26,13 @@ features:
       default: latest
       resolve: curl -fsSL "https://api.github.com/repos/cli/cli/releases/latest" | jq -r '.tag_name | ltrimstr("v")'
 
+  - names: [mise, all, all-tools]
+    path: Dockerfile-parts/mise
+    version:
+      env: MISE_VERSION
+      default: latest
+      resolve: curl -fsSL "https://api.github.com/repos/jdx/mise/releases/latest" | jq -r '.tag_name | ltrimstr("v")'
+
   - names: [psql, postgres, postgresql, all, all-tools]
     path: Dockerfile-parts/psql
     version:
