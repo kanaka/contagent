@@ -10,8 +10,17 @@ CONTAGENT_GROUPNAME=${CONTAGENT_GROUPNAME:-$CONTAGENT_USERNAME}
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
+print_motd_if_interactive() {
+  [ -t 0 ] && [ -t 1 ] || return 0
+  [ -s /etc/contagent-motd ] || return 0
+
+  cat /etc/contagent-motd
+}
+
 exec_as_user() {
   [ "$#" -gt 0 ] || set -- bash -l
+
+  print_motd_if_interactive
 
   # Keep docker exec behavior deterministic: always set HOME/USER for mapped identity.
   exec runuser -u "$CONTAGENT_USERNAME" -- env \

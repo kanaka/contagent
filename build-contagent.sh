@@ -19,9 +19,12 @@ CONTAGENT_FEATURES=${CONTAGENT_FEATURES:-}
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 manifest_file="$script_dir/Dockerfile.yaml"
 selected_dockerfile="$script_dir/Dockerfile.selected"
+motd_file="$script_dir/.contagent-motd.generated"
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 need_cmd() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
+cleanup() { rm -f "$motd_file"; }
+trap cleanup EXIT
 
 for arg in "$@"; do [ "$arg" = -h ] || [ "$arg" = --help ] && { usage; exit 0; }; done
 
@@ -48,6 +51,7 @@ done
 
 : > "$selected_dockerfile"
 docker_args=()
+motd_lines=()
 
 echo "Building image with selected features:"
 while IFS= read -r feature; do
@@ -82,6 +86,7 @@ while IFS= read -r feature; do
     resolved=$requested
     [ "$requested" = latest ] && [ -n "$resolve_cmd" ] && resolved=$(sh -lc "$resolve_cmd")
     docker_args+=(--build-arg "$env_name=$resolved")
+    motd_lines+=("$label $resolved")
     echo "  $label=$resolved"
   else
     echo "  $label"
@@ -94,6 +99,17 @@ done <<<"$feature_rows"
 
 voom_version=$(REPO_ROOT_VOOM=1 "$script_dir/voom-like-version.sh")
 image_ref="${CONTAGENT_IMAGE_NAME}:${voom_version}"
+
+rm -f "$motd_file"
+if [ "${#motd_lines[@]}" -gt 0 ]; then
+  {
+    printf 'contagent tool versions:\n'
+    for line in "${motd_lines[@]}"; do
+      printf '  - %s\n' "$line"
+    done
+  } > "$motd_file"
+  printf '\nCOPY %s /etc/contagent-motd\n' "$(basename "$motd_file")" >> "$selected_dockerfile"
+fi
 
 echo "Producing tags:"
 echo "  $image_ref"
