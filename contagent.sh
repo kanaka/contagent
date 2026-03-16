@@ -104,25 +104,23 @@ docker_args+=(
 [ -n "${TERM:-}" ] && docker_args+=(--env "TERM=$TERM")
 [ -n "${COLORTERM:-}" ] && docker_args+=(--env "COLORTERM=$COLORTERM")
 
-mount_allowlist=(
-  "$host_home/.claude"
-  "$host_home/.codex"
-  "$host_home/.copilot"
-  "$host_home/.pi"
-  "$host_home/.supabase"
-  "$host_home/.config/opencode"
-  "$host_home/.local/share/opencode"
-  "$host_home/.local/state/opencode"
-  "$host_home/.cache/opencode"
-  "$host_home/.cache/claude"
-  "$host_home/.cache/.bun"
-  "$host_home/.cache/bun"
+mountlist=(
+  "$host_home/.claude:$host_home/.claude"
+  "$host_home/.codex:$host_home/.codex"
+  "$host_home/.copilot:$host_home/.copilot"
+  "$host_home/.pi:$host_home/.pi"
+  "$host_home/.supabase:$host_home/.supabase"
+  "$host_home/.config/opencode:$host_home/.config/opencode"
+  "$host_home/.local/share/opencode:$host_home/.local/share/opencode"
+  "$host_home/.local/state/opencode:$host_home/.local/state/opencode"
+  "$host_home/.cache/contagent:/var/cache/contagent"
 )
 
 # Precreate mountpoints to avoid root-owned host paths from first container write.
-for host_path in "${mount_allowlist[@]}"; do
+for mount_entry in "${mountlist[@]}"; do
+  host_path=${mount_entry%%:*}
   mkdir -p "$host_path"
-  docker_args+=(--volume "$host_path:$host_path")
+  docker_args+=(--volume "$mount_entry")
 done
 
 extra_group_gids=()

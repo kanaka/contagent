@@ -128,6 +128,7 @@ Mounted by default:
 
 - Current project directory (same absolute path).
 - Allowlisted agent directories under `$HOME`.
+- Contagent cache root mount: `~/.cache/contagent` -> `/var/cache/contagent` in the container.
 - SSH agent socket when detected.
 
 Mounted only when enabled:

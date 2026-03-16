@@ -31,6 +31,15 @@ run_in_contagent_with_docker_socket() {
   "$contagent_sh" --docker-socket bash -lc "$1"
 }
 
+run_cache_mount_test() {
+  mkdir -p "$HOME/.cache/contagent"; : > "$HOME/.cache/contagent/.host-to-container-$cache_token"
+  "$contagent_sh" bash -lc "test -L \"\$HOME/.cache\" && test \"\$(readlink \"\$HOME/.cache\")\" = \"/var/cache/contagent\" && test -f \"\$HOME/.cache/.host-to-container-$cache_token\" && : > \"\$HOME/.cache/.container-to-host-$cache_token\""
+  test -f "$HOME/.cache/contagent/.container-to-host-$cache_token"
+  rm -f "$HOME/.cache/contagent/.host-to-container-$cache_token" "$HOME/.cache/contagent/.container-to-host-$cache_token"
+}
+
+cache_token="contagent-cache-smoketest-$$"
+
 command -v docker >/dev/null 2>&1 || die "docker is required"
 docker image inspect "$CONTAGENT_IMAGE" >/dev/null 2>&1 || {
   die "image ${CONTAGENT_IMAGE} not found locally"
@@ -45,6 +54,8 @@ run_step "identity mapping" run_in_contagent '
   test "$(id -un)" = "$CONTAGENT_USERNAME"
 '
 
+run_step "cache symlink + host mount wiring" run_cache_mount_test
+
 run_step "docker cli available" run_in_contagent '
   command -v docker >/dev/null
   docker --version >/dev/null
@@ -57,6 +68,8 @@ run_step "opencode cli availability" run_in_contagent 'command -v opencode >/dev
 run_step "pi cli availability" run_in_contagent 'command -v pi >/dev/null && pi --version >/dev/null || true'
 run_step "codex cli availability" run_in_contagent 'command -v codex >/dev/null && codex --version >/dev/null || true'
 run_step "copilot cli availability" run_in_contagent 'command -v copilot >/dev/null && copilot --version >/dev/null || true'
+run_step "rust toolchain availability" run_in_contagent 'if command -v cargo >/dev/null; then cargo --version >/dev/null; command -v rustc >/dev/null; rustc --version >/dev/null; fi'
+run_step "cargo install root usability" run_in_contagent 'if command -v cargo >/dev/null; then cargo install --list >/dev/null; fi'
 
 if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ]; then
   run_step "ssh agent forwarding" run_in_contagent '

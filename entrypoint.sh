@@ -94,6 +94,11 @@ sock=${docker_host#unix://}
 # Best-effort home dir fixup
 mkdir -p "$CONTAGENT_HOME"
 chown "$CONTAGENT_UID:$CONTAGENT_GID" "$CONTAGENT_HOME" >/dev/null 2>&1 || true
+
+mkdir -p /var/cache/contagent
+[ -e "$CONTAGENT_HOME/.cache" ] && die "$CONTAGENT_HOME/.cache already exists"
+ln -s /var/cache/contagent "$CONTAGENT_HOME/.cache"
+
 getent passwd "$CONTAGENT_USERNAME" >/dev/null 2>&1 || {
   die "mapped user $CONTAGENT_USERNAME does not exist after setup"
 }
