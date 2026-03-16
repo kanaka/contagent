@@ -29,21 +29,11 @@ keeping filesystem and credential exposure narrow and intentional.
 
 ## Quick start
 
-Build:
+Build container image with selected features/tools/agents:
 
 ```bash
-./build-contagent.sh
+./build-contagent.sh --docker --gh --psql --pi --claude
 ```
-
-Build with feature flags:
-
-```bash
-./build-contagent.sh --build --docker --gh --mise --psql --pi --claude --opencode --codex --copilot
-```
-
-Build composition is driven by `Dockerfile.yaml` and assembled from
-`Dockerfile-parts/` into `Dockerfile.selected` on each build (`base` is always included).
-Manifest parsing uses local `yq` when available, otherwise `mikefarah/yq` via Docker.
 
 Launch interactive shell in current project:
 
@@ -77,35 +67,37 @@ environment (`HOME`/`USER`) instead of dropping you into root context.
 
 ## Configuration
 
-Build-time environment:
+Build-time options:
 
-- `CONTAGENT_IMAGE_NAME` (default: `contagent`)
-- `CONTAGENT_FEATURES` (default: `pi`)
-- `CLAUDE_CODE_VERSION` (default: `latest`)
-- `OPENCODE_VERSION` (default: `latest`)
-- `PI_VERSION` (default: `latest`)
-- `CODEX_VERSION` (default: `latest`)
-- `COPILOT_VERSION` (default: `latest`)
-- `GH_VERSION` (default: `latest`)
-
-Build-time feature flags:
-
-- `--build` (alias: `--build-tools`)
-- `--docker`
-- `--gh` (aliases: `--github`, `--github-cli`, `--githubcli`)
-- `--mise`
-- `--psql` (aliases: `--postgres`, `--postgresql`)
-- `--pi`
-- `--claude` (aliases: `--claude-code`, `--cc`, `--claudecode`)
-- `--opencode`
-- `--codex`
-- `--copilot` (aliases: `--github-copilot`, `--githubcopilot`)
-- `--all-tools` (all non-agent tool features)
-- `--all-agents` (all agent features)
-- `--all` (all tool + agent features)
+- Global:
+  - `CONTAGENT_IMAGE_NAME` (default: `contagent`)
+  - `CONTAGENT_FEATURES` (default: ``)
+- Features (flag + version env):
+  - `--build` (alias: `--build-tools`) + `BUILD_ESSENTIAL_VERSION` (default: `latest`)
+  - `--docker` + `DOCKER_VERSION` (default: `latest`)
+  - `--gh` (aliases: `--github`, `--github-cli`, `--githubcli`) + `GH_VERSION` (default: `latest`)
+  - `--mise` + `MISE_VERSION` (default: `latest`)
+  - `--psql` (aliases: `--postgres`, `--postgresql`) + `PSQL_VERSION` (default: `latest`)
+  - `--go` (alias: `--golang`) + `GO_VERSION` (default: `1.26.0`)
+  - `--rust` + `RUST_VERSION` (default: `1.89.0`)
+  - `--claude` (aliases: `--claude-code`, `--cc`, `--claudecode`) + `CLAUDE_CODE_VERSION` (default: `latest`)
+  - `--opencode` + `OPENCODE_VERSION` (default: `latest`)
+  - `--pi` (alias: `--pi-agent`) + `PI_VERSION` (default: `latest`)
+  - `--codex` + `CODEX_VERSION` (default: `latest`)
+  - `--copilot` (aliases: `--github-copilot`, `--githubcopilot`) + `COPILOT_VERSION` (default: `latest`)
+- Aggregates:
+  - `--all-tools` (all non-agent tool features)
+  - `--all-agents` (all agent features)
+  - `--all` (all tool + agent features)
 
 `CONTAGENT_FEATURES` sets the default enabled feature list; CLI flags add to it.
 Both accept any token listed in a feature's `names` array in `Dockerfile.yaml`.
+
+Build implementation notes:
+
+- Build composition is driven by `Dockerfile.yaml` and assembled from
+  `Dockerfile-parts/` into `Dockerfile.selected` on each build (`base` is always included).
+- Manifest parsing uses local `yq` when available, otherwise `mikefarah/yq` via Docker.
 
 Runtime environment:
 
