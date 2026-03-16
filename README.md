@@ -10,7 +10,7 @@ keeping filesystem and credential exposure narrow and intentional.
 - Run agents with high autonomy in a constrained environment.
 - Keep execution focused on the current project path, not your full home directory.
 - Preserve day-to-day workflows: interactive shell, SSH agent forwarding, Docker
-  client access to host daemon.
+  client access to host daemon (if enabled).
 
 ## What it provides
 
@@ -112,10 +112,14 @@ Examples:
 
 ```bash
 CONTAGENT_FEATURES="pi codex" PI_VERSION=0.56.0 ./build-contagent.sh
+./contagent.sh pi --version
+
 ./build-contagent.sh --claude --opencode --copilot
 CONTAGENT_IMAGE=contagent:20260302_101530-gabc123 ./contagent.sh
+
 CONTAGENT_DOCKER_SOCKET=1 ./contagent.sh docker ps
 ./contagent.sh --docker-socket docker ps
+
 CONTAGENT_EXTRA_GROUP_GIDS=970 ./contagent.sh
 ./contagent.sh --extra-groups 970,971
 ```
