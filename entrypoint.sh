@@ -18,9 +18,10 @@ print_motd_if_interactive() {
 }
 
 exec_as_user() {
-  [ "$#" -gt 0 ] || set -- bash -l
-
-  print_motd_if_interactive
+  if [ "$#" -eq 0 ]; then
+    set -- bash -l
+    print_motd_if_interactive
+  fi
 
   # Keep docker exec behavior deterministic: always set HOME/USER for mapped identity.
   exec runuser -u "$CONTAGENT_USERNAME" -- env \

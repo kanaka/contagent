@@ -44,7 +44,7 @@ Launch interactive shell in current project:
 Run one-shot command:
 
 ```bash
-./contagent.sh opencode --help
+./contagent.sh pi --help
 ```
 
 Use a specific built tag:
