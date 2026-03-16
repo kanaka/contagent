@@ -102,7 +102,11 @@ Build implementation notes:
 Runtime environment:
 
 - `CONTAGENT_IMAGE` (default: `contagent:latest`)
-- `CONTAGENT_EXTRA_GROUP_GIDS` (comma-separated numeric gids)
+- `CONTAGENT_DOCKER_SOCKET` (non-empty enables docker socket mount; empty disables)
+- `CONTAGENT_EXTRA_GROUP_GIDS` (non-empty comma-separated gid list applies supplementary groups; empty disables)
+- CLI options:
+  - `--docker-socket` / `--no-docker-socket`
+  - `--extra-groups <gid[,gid]>` (appends to `CONTAGENT_EXTRA_GROUP_GIDS`)
 
 Examples:
 
@@ -110,7 +114,10 @@ Examples:
 CONTAGENT_FEATURES="pi codex" PI_VERSION=0.56.0 ./build-contagent.sh
 ./build-contagent.sh --claude --opencode --copilot
 CONTAGENT_IMAGE=contagent:20260302_101530-gabc123 ./contagent.sh
-CONTAGENT_EXTRA_GROUP_GIDS=970 ./contagent.sh docker ps
+CONTAGENT_DOCKER_SOCKET=1 ./contagent.sh docker ps
+./contagent.sh --docker-socket docker ps
+CONTAGENT_EXTRA_GROUP_GIDS=970 ./contagent.sh
+./contagent.sh --extra-groups 970,971
 ```
 
 ## Trust model and security boundaries
@@ -121,8 +128,11 @@ Mounted by default:
 
 - Current project directory (same absolute path).
 - Allowlisted agent directories under `$HOME`.
-- Docker socket when detected.
 - SSH agent socket when detected.
+
+Mounted only when enabled:
+
+- Docker socket (`CONTAGENT_DOCKER_SOCKET=1` or `--docker-socket`) when detected.
 
 Not mounted by default:
 

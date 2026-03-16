@@ -27,6 +27,10 @@ run_in_contagent() {
   "$contagent_sh" bash -lc "$1"
 }
 
+run_in_contagent_with_docker_socket() {
+  "$contagent_sh" --docker-socket bash -lc "$1"
+}
+
 command -v docker >/dev/null 2>&1 || die "docker is required"
 docker image inspect "$CONTAGENT_IMAGE" >/dev/null 2>&1 || {
   die "image ${CONTAGENT_IMAGE} not found locally"
@@ -46,7 +50,7 @@ run_step "docker cli available" run_in_contagent '
   docker --version >/dev/null
 '
 
-run_step "docker daemon reachable" run_in_contagent 'docker ps >/dev/null'
+run_step "docker daemon reachable" run_in_contagent_with_docker_socket 'docker ps >/dev/null'
 
 run_step "claude cli availability" run_in_contagent 'command -v claude >/dev/null && claude --version >/dev/null || true'
 run_step "opencode cli availability" run_in_contagent 'command -v opencode >/dev/null && opencode --version >/dev/null || true'
