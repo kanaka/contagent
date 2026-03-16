@@ -17,7 +17,7 @@ features:
     version:
       env: DOCKER_VERSION
       default: latest
-      resolve: arch=$(uname -m); case "$arch" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) arch=amd64 ;; esac; packages=$(curl -fsSL "https://download.docker.com/linux/debian/dists/bookworm/stable/binary-${arch}/Packages"); printf '%s\n' "$packages" | awk '/^Package:[[:space:]]docker-ce-cli$/{f=1;next} f&&/^Version:[[:space:]]/{print $2; exit}'
+      resolve: arch=$(uname -m); case "$arch" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) arch=amd64 ;; esac; curl -fsSL "https://download.docker.com/linux/debian/dists/bookworm/stable/binary-${arch}/Packages" | awk '/^Package:[[:space:]]docker-ce-cli$/{p=1;next} p&&/^Version:[[:space:]]/{v=$2} p&&/^$/{p=0} END{print v}'
 
   - names: [gh, github, github-cli, githubcli, all, all-tools]
     path: Dockerfile-parts/gh
