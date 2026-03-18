@@ -99,6 +99,10 @@ mkdir -p /var/cache/contagent
 [ -e "$CONTAGENT_HOME/.cache" ] && die "$CONTAGENT_HOME/.cache already exists"
 ln -s /var/cache/contagent "$CONTAGENT_HOME/.cache"
 
+mkdir -p "$CONTAGENT_HOME/.local/state/contagent"
+[ -e "$CONTAGENT_HOME/.bash_history" ] && die "$CONTAGENT_HOME/.bash_history already exists"
+ln -s "$CONTAGENT_HOME/.local/state/contagent/bash_history" "$CONTAGENT_HOME/.bash_history"
+
 getent passwd "$CONTAGENT_USERNAME" >/dev/null 2>&1 || {
   die "mapped user $CONTAGENT_USERNAME does not exist after setup"
 }

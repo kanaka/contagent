@@ -131,7 +131,7 @@ Contagent reduces exposure; it is not a hard security sandbox.
 Mounted by default:
 
 - Current project directory (same absolute path).
-- Allowlisted agent directories under `$HOME`.
+- Specific list of agent/state directories under `$HOME`.
 - Contagent cache root mount: `~/.cache/contagent` -> `/var/cache/contagent` in the container.
 - SSH agent socket when detected.
 

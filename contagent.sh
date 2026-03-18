@@ -115,6 +115,7 @@ mountlist=(
   "$host_home/.local/share/opencode:$host_home/.local/share/opencode"
   "$host_home/.local/share/mise:$host_home/.local/share/mise"
   "$host_home/.local/state/opencode:$host_home/.local/state/opencode"
+  "$host_home/.local/state/contagent:$host_home/.local/state/contagent"
   "$host_home/.cache/contagent:/var/cache/contagent"
 )
 
