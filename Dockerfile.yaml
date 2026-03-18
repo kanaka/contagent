@@ -1,12 +1,9 @@
 version: 1
 
 features:
-  - names: [base, all, all-tools]
+  - names: [base]
     path: Dockerfile-parts/base
     required: true
-    mounts:
-      - "~/.local/state/contagent:~/.local/state/contagent"
-      - "~/.cache/contagent:/var/cache/contagent"
 
   - names: [build, build-tools, all, all-tools]
     path: Dockerfile-parts/build
@@ -106,3 +103,13 @@ features:
       env: COPILOT_VERSION
       default: latest
       resolve: curl -fsSL "https://registry.npmjs.org/@github/copilot/latest" | jq -r .version
+
+  - names: [runtime]
+    path: Dockerfile-parts/runtime
+    required: true
+    version:
+      default: latest
+      resolve: ./voom-like-version.sh .
+    mounts:
+      - "~/.local/state/contagent:~/.local/state/contagent"
+      - "~/.cache/contagent:/var/cache/contagent"

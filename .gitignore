@@ -3,4 +3,5 @@
 .config
 .local
 .pi
-.Dockerfile
+.Dockerfile.generated
+.contagent-motd.generated

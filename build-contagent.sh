@@ -18,13 +18,11 @@ CONTAGENT_FEATURES=${CONTAGENT_FEATURES:-}
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 manifest_file="$script_dir/Dockerfile.yaml"
-dockerfile="$script_dir/.Dockerfile"
+dockerfile="$script_dir/.Dockerfile.generated"
 motd_file="$script_dir/.contagent-motd.generated"
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 need_cmd() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
-cleanup() { rm -f "$motd_file"; }
-trap cleanup EXIT
 
 for arg in "$@"; do [ "$arg" = -h ] || [ "$arg" = --help ] && { usage; exit 0; }; done
 
@@ -84,18 +82,17 @@ while IFS= read -r feature; do
   cat "$script_dir/$path" >> "$dockerfile"
 
   version_value=builtin
-  if [ -n "$env_name" ]; then
-    requested=${!env_name:-$default_value}
-    resolved=$requested
-    if [ "$requested" = latest ]; then
+  if jq -e 'has("version")' >/dev/null <<<"$feature"; then
+    version_value=${default_value:-latest}
+    [ -n "$env_name" ] && version_value=${!env_name:-$version_value}
+    if [ "$version_value" = latest ]; then
       [ -n "$resolve_cmd" ] || die "$label requested latest but has no resolve command"
-      resolved=$(sh -lc "$resolve_cmd")
-      [ -n "$resolved" ] && [ "$resolved" != null ] || die "failed to resolve latest for $label ($env_name)"
+      version_value=$(sh -lc "$resolve_cmd")
+      [ -n "$version_value" ] && [ "$version_value" != null ] || die "failed to resolve latest for $label"
     fi
-    docker_args+=(--build-arg "$env_name=$resolved")
-    motd_lines+=("$label $resolved")
-    version_value=$resolved
-    echo "  $label=$resolved"
+    [ -n "$env_name" ] && docker_args+=(--build-arg "$env_name=$version_value")
+    motd_lines+=("$label $version_value")
+    echo "  $label=$version_value"
   else
     echo "  $label"
   fi
@@ -113,7 +110,7 @@ done <<<"$feature_rows"
 voom_version=$(REPO_ROOT_VOOM=1 "$script_dir/voom-like-version.sh")
 image_ref="${CONTAGENT_IMAGE_NAME}:${voom_version}"
 
-rm -f "$motd_file"
+cat /dev/null > "$motd_file"
 if [ "${#motd_lines[@]}" -gt 0 ]; then
   {
     printf 'contagent tool versions:\n'
@@ -121,7 +118,6 @@ if [ "${#motd_lines[@]}" -gt 0 ]; then
       printf '  - %s\n' "$line"
     done
   } > "$motd_file"
-  printf '\nCOPY %s /etc/contagent-motd\n' "$(basename "$motd_file")" >> "$dockerfile"
 fi
 
 if [ "${#component_labels[@]}" -gt 0 ]; then
