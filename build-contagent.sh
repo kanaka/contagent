@@ -84,7 +84,11 @@ while IFS= read -r feature; do
   if [ -n "$env_name" ]; then
     requested=${!env_name:-$default_value}
     resolved=$requested
-    [ "$requested" = latest ] && [ -n "$resolve_cmd" ] && resolved=$(sh -lc "$resolve_cmd")
+    if [ "$requested" = latest ]; then
+      [ -n "$resolve_cmd" ] || die "$label requested latest but has no resolve command"
+      resolved=$(sh -lc "$resolve_cmd")
+      [ -n "$resolved" ] && [ "$resolved" != null ] || die "failed to resolve latest for $label ($env_name)"
+    fi
     docker_args+=(--build-arg "$env_name=$resolved")
     motd_lines+=("$label $resolved")
     echo "  $label=$resolved"
