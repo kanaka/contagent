@@ -18,7 +18,7 @@ CONTAGENT_FEATURES=${CONTAGENT_FEATURES:-}
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 manifest_file="$script_dir/Dockerfile.yaml"
-selected_dockerfile="$script_dir/Dockerfile.selected"
+dockerfile="$script_dir/.Dockerfile"
 motd_file="$script_dir/.contagent-motd.generated"
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -49,7 +49,7 @@ for token in $CONTAGENT_FEATURES "$@"; do
   unknown["$token"]=1
 done
 
-: > "$selected_dockerfile"
+: > "$dockerfile"
 docker_args=()
 motd_lines=()
 component_labels=()
@@ -80,8 +80,8 @@ while IFS= read -r feature; do
 
   [ "$select" -eq 1 ] || continue
   [ -f "$script_dir/$path" ] || die "missing Dockerfile part: $path"
-  [ -s "$selected_dockerfile" ] && printf '\n' >> "$selected_dockerfile"
-  cat "$script_dir/$path" >> "$selected_dockerfile"
+  [ -s "$dockerfile" ] && printf '\n' >> "$dockerfile"
+  cat "$script_dir/$path" >> "$dockerfile"
 
   version_value=builtin
   if [ -n "$env_name" ]; then
@@ -108,7 +108,7 @@ done <<<"$feature_rows"
 
 [ "${#unknown[@]}" -eq 0 ] || die "unknown feature(s): $(printf '%s\n' "${!unknown[@]}" | sort -u | paste -sd',' -)"
 
-[ -s "$selected_dockerfile" ] || die "no features selected"
+[ -s "$dockerfile" ] || die "no features selected"
 
 voom_version=$(REPO_ROOT_VOOM=1 "$script_dir/voom-like-version.sh")
 image_ref="${CONTAGENT_IMAGE_NAME}:${voom_version}"
@@ -121,22 +121,22 @@ if [ "${#motd_lines[@]}" -gt 0 ]; then
       printf '  - %s\n' "$line"
     done
   } > "$motd_file"
-  printf '\nCOPY %s /etc/contagent-motd\n' "$(basename "$motd_file")" >> "$selected_dockerfile"
+  printf '\nCOPY %s /etc/contagent-motd\n' "$(basename "$motd_file")" >> "$dockerfile"
 fi
 
 if [ "${#component_labels[@]}" -gt 0 ]; then
-  printf '\nLABEL' >> "$selected_dockerfile"
+  printf '\nLABEL' >> "$dockerfile"
   for label_kv in "${component_labels[@]}"; do
-    printf ' %s' "$label_kv" >> "$selected_dockerfile"
+    printf ' %s' "$label_kv" >> "$dockerfile"
   done
-  printf '\n' >> "$selected_dockerfile"
+  printf '\n' >> "$dockerfile"
 fi
 
 echo "Producing tags:"
 echo "  $image_ref"
 latest_ref="${CONTAGENT_IMAGE_NAME}:latest"
 echo "  $latest_ref"
-docker build "${docker_args[@]}" -t "$image_ref" -f "$selected_dockerfile" "$script_dir"
+docker build "${docker_args[@]}" -t "$image_ref" -f "$dockerfile" "$script_dir"
 docker tag "$image_ref" "$latest_ref"
 
 echo "Run with:"

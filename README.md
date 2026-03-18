@@ -98,7 +98,7 @@ Feature versions are also labeled (`io.contagent.component.<name>.version`).
 Build implementation notes:
 
 - Build composition is driven by `Dockerfile.yaml` and assembled from
-  `Dockerfile-parts/` into `Dockerfile.selected` on each build (`base` is always included).
+  `Dockerfile-parts/` into `.Dockerfile` on each build (`base` is always included).
 - Manifest parsing uses local `yq` when available, otherwise `mikefarah/yq` via Docker.
 
 Runtime environment:

@@ -3,4 +3,4 @@
 .config
 .local
 .pi
-Dockerfile.selected
+.Dockerfile
