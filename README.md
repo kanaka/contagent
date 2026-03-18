@@ -25,7 +25,7 @@ keeping filesystem and credential exposure narrow and intentional.
 
 - Docker on host.
 - Bash 4+ for `contagent.sh` and `build-contagent.sh`.
-- `curl` and `jq` on host for resolving `latest` feature versions.
+- `curl` and `jq` on host for resolving `latest` feature versions and image-label mount metadata.
 
 ## Quick start
 
@@ -92,6 +92,8 @@ Build-time options:
 
 `CONTAGENT_FEATURES` sets the default enabled feature list; CLI flags add to it.
 Both accept any token listed in a feature's `names` array in `Dockerfile.yaml`.
+Feature mounts are defined in each feature's `mounts` list and propagated into image labels at build time (`io.contagent.component.<name>.mounts`).
+Feature versions are also labeled (`io.contagent.component.<name>.version`).
 
 Build implementation notes:
 
@@ -131,8 +133,10 @@ Contagent reduces exposure; it is not a hard security sandbox.
 Mounted by default:
 
 - Current project directory (same absolute path).
-- Specific list of agent/state directories under `$HOME`.
-- Contagent cache root mount: `~/.cache/contagent` -> `/var/cache/contagent` in the container.
+- Feature-specific mounts
+- Base feature mounts include:
+  - `~/.local/state/contagent` -> `~/.local/state/contagent`
+  - `~/.cache/contagent` -> `/var/cache/contagent`
 - SSH agent socket when detected.
 
 Mounted only when enabled:
@@ -142,7 +146,7 @@ Mounted only when enabled:
 Not mounted by default:
 
 - Arbitrary paths from `$HOME`.
-- Other host directories outside project + allowlist.
+- Other host directories apart from project / feature mounts.
 
 Important implications:
 

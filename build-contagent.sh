@@ -52,6 +52,7 @@ done
 : > "$selected_dockerfile"
 docker_args=()
 motd_lines=()
+component_labels=()
 
 echo "Building image with selected features:"
 while IFS= read -r feature; do
@@ -62,6 +63,7 @@ while IFS= read -r feature; do
   env_name=$(jq -r '.version.env // ""' <<<"$feature")
   default_value=$(jq -r '.version.default // ""' <<<"$feature")
   resolve_cmd=$(jq -r '.version.resolve // ""' <<<"$feature")
+  mounts_csv=$(jq -r '(.mounts // []) | join(",")' <<<"$feature")
 
   [ -n "$label" ] && [ -n "$path" ] && [ -n "$names_csv" ] || die "invalid manifest row"
   select=0
@@ -81,6 +83,7 @@ while IFS= read -r feature; do
   [ -s "$selected_dockerfile" ] && printf '\n' >> "$selected_dockerfile"
   cat "$script_dir/$path" >> "$selected_dockerfile"
 
+  version_value=builtin
   if [ -n "$env_name" ]; then
     requested=${!env_name:-$default_value}
     resolved=$requested
@@ -91,10 +94,16 @@ while IFS= read -r feature; do
     fi
     docker_args+=(--build-arg "$env_name=$resolved")
     motd_lines+=("$label $resolved")
+    version_value=$resolved
     echo "  $label=$resolved"
   else
     echo "  $label"
   fi
+
+  esc_version=${version_value//\"/\\\"}
+  esc_mounts=${mounts_csv//\"/\\\"}
+  component_labels+=("io.contagent.component.${label}.version=\"$esc_version\"")
+  component_labels+=("io.contagent.component.${label}.mounts=\"$esc_mounts\"")
 done <<<"$feature_rows"
 
 [ "${#unknown[@]}" -eq 0 ] || die "unknown feature(s): $(printf '%s\n' "${!unknown[@]}" | sort -u | paste -sd',' -)"
@@ -113,6 +122,14 @@ if [ "${#motd_lines[@]}" -gt 0 ]; then
     done
   } > "$motd_file"
   printf '\nCOPY %s /etc/contagent-motd\n' "$(basename "$motd_file")" >> "$selected_dockerfile"
+fi
+
+if [ "${#component_labels[@]}" -gt 0 ]; then
+  printf '\nLABEL' >> "$selected_dockerfile"
+  for label_kv in "${component_labels[@]}"; do
+    printf ' %s' "$label_kv" >> "$selected_dockerfile"
+  done
+  printf '\n' >> "$selected_dockerfile"
 fi
 
 echo "Producing tags:"

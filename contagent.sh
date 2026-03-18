@@ -69,9 +69,7 @@ workdir=$(pwd)
 need_cmd() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
 
 append_gid_unique() {
-  local gid=$1
-
-  local existing
+  local gid=$1 existing
   for existing in "${extra_group_gids[@]}"; do
     [ "$existing" = "$gid" ] && return 0
   done
@@ -79,8 +77,9 @@ append_gid_unique() {
 }
 
 need_cmd docker
+need_cmd jq
 # Local-image-first by design; fail early instead of pulling implicitly.
-docker image inspect "$CONTAGENT_IMAGE" >/dev/null 2>&1 || {
+image_inspect=$(docker image inspect "$CONTAGENT_IMAGE" 2>/dev/null) || {
   die "image ${CONTAGENT_IMAGE} is not available locally; build it first with ./build-contagent.sh"
 }
 
@@ -104,27 +103,14 @@ docker_args+=(
 [ -n "${TERM:-}" ] && docker_args+=(--env "TERM=$TERM")
 [ -n "${COLORTERM:-}" ] && docker_args+=(--env "COLORTERM=$COLORTERM")
 
-mountlist=(
-  "$host_home/.claude:$host_home/.claude"
-  "$host_home/.codex:$host_home/.codex"
-  "$host_home/.copilot:$host_home/.copilot"
-  "$host_home/.pi:$host_home/.pi"
-  "$host_home/.supabase:$host_home/.supabase"
-  "$host_home/.config/opencode:$host_home/.config/opencode"
-  "$host_home/.config/mise:$host_home/.config/mise"
-  "$host_home/.local/share/opencode:$host_home/.local/share/opencode"
-  "$host_home/.local/share/mise:$host_home/.local/share/mise"
-  "$host_home/.local/state/opencode:$host_home/.local/state/opencode"
-  "$host_home/.local/state/contagent:$host_home/.local/state/contagent"
-  "$host_home/.cache/contagent:/var/cache/contagent"
-)
-
-# Precreate mountpoints to avoid root-owned host paths from first container write.
-for mount_entry in "${mountlist[@]}"; do
-  host_path=${mount_entry%%:*}
-  mkdir -p "$host_path"
-  docker_args+=(--volume "$mount_entry")
-done
+while IFS= read -r mount_entry; do
+  [[ "$mount_entry" == *:* ]] || { warn "ignoring invalid mount spec from labels: $mount_entry"; continue; }
+  src=${mount_entry%%:*}; dst=${mount_entry#*:}
+  [[ "$src" == '~' || "$src" == '~/'* ]] && src="$host_home${src#\~}"
+  [[ "$dst" == '~' || "$dst" == '~/'* ]] && dst="$host_home${dst#\~}"
+  mkdir -p "$src"
+  docker_args+=(--volume "$src:$dst")
+done < <(printf '%s' "$image_inspect" | jq -r '.[0].Config.Labels // {} | to_entries[] | select(.key|test("^io\\.contagent\\.component\\..+\\.mounts$")) | .value | split(",")[] | select(length>0)' | awk '!seen[$0]++')
 
 extra_group_gids=()
 if [ -n "$CONTAGENT_EXTRA_GROUP_GIDS" ]; then
@@ -145,6 +131,12 @@ docker_sock_candidates=(
 )
 
 CONTAGENT_DOCKER_SOCKET=${CONTAGENT_DOCKER_SOCKET//[[:space:]]/}
+docker_capable=$(printf '%s' "$image_inspect" | jq -r 'if (.[0].Config.Labels // {} | has("io.contagent.component.docker.version")) then "1" else "" end')
+
+[ -n "$CONTAGENT_DOCKER_SOCKET" ] && [ -z "$docker_capable" ] &&
+  warn "docker socket requested, but image has no docker component"
+[ -z "$CONTAGENT_DOCKER_SOCKET" ] && [ -n "$docker_capable" ] &&
+  warn "image has docker component, but docker socket is not requested"
 
 if [ -n "$CONTAGENT_DOCKER_SOCKET" ]; then
   mounted_docker_sock=0
