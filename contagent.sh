@@ -173,5 +173,4 @@ if [ "${#extra_group_gids[@]}" -gt 0 ]; then
   )
 fi
 
-[ "$#" -gt 0 ] || set -- bash -l
 exec docker run "${docker_args[@]}" "$CONTAGENT_IMAGE" "$@"
