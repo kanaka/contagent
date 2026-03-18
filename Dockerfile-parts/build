@@ -2,8 +2,8 @@ ARG BUILD_ESSENTIAL_VERSION=latest
 
 RUN apt-get update \
     && if [ "$BUILD_ESSENTIAL_VERSION" = latest ]; then \
-         apt-get install -y --no-install-recommends build-essential libssl-dev pkg-config; \
+         apt-get install -y --no-install-recommends build-essential make libssl-dev pkg-config; \
        else \
-         apt-get install -y --no-install-recommends "build-essential=$BUILD_ESSENTIAL_VERSION" libssl-dev pkg-config; \
+         apt-get install -y --no-install-recommends "build-essential=$BUILD_ESSENTIAL_VERSION" make libssl-dev pkg-config; \
        fi \
     && rm -rf /var/lib/apt/lists/*
