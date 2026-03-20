@@ -49,7 +49,8 @@ features:
     path: Dockerfile-parts/go
     version:
       env: GO_VERSION
-      default: "1.26.0"
+      default: latest
+      resolve: curl -fsSL "https://go.dev/VERSION?m=text" | tr -d '\r' | sed -n '1{s/^go//;p;}'
 
   - names: [java, jdk, clojure, clj, clojurescript, cljs, all, all-tools]
     path: Dockerfile-parts/java
@@ -80,7 +81,8 @@ features:
     path: Dockerfile-parts/rust
     version:
       env: RUST_VERSION
-      default: "1.89.0"
+      default: latest
+      resolve: curl -fsSL "https://static.rust-lang.org/dist/channel-rust-stable.toml" | sed -n '/^\[pkg.rust\]$/,/^\[/{/^version = /{s/^version = "//; s/"$//; s/ .*//; p}}'
 
   - names: [claude, claude-code, cc, claudecode, all, all-agents]
     path: Dockerfile-parts/claude-code

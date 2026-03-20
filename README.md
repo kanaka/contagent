@@ -73,21 +73,21 @@ Build-time options:
   - `CONTAGENT_IMAGE_NAME` (default: `contagent`)
   - `CONTAGENT_FEATURES` (default: ``)
 - Features (flag + version env):
-  - `--build` (alias: `--build-tools`) + `BUILD_ESSENTIAL_VERSION` (default: `latest`)
-  - `--docker` + `DOCKER_VERSION` (default: `latest`)
-  - `--gh` (aliases: `--github`, `--github-cli`, `--githubcli`) + `GH_VERSION` (default: `latest`)
-  - `--mise` + `MISE_VERSION` (default: `latest`)
-  - `--psql` (aliases: `--postgres`, `--postgresql`) + `PSQL_VERSION` (default: `latest`)
-  - `--go` (alias: `--golang`) + `GO_VERSION` (default: `1.26.0`)
-  - `--java` (aliases: `--jdk`, `--clojure`, `--clj`, `--clojurescript`, `--cljs`) + `JAVA_VERSION` (default: `latest`)
-  - `--clojure` (alias: `--clj`) + `CLOJURE_VERSION` (default: `latest`)
-  - `--clojurescript` (alias: `--cljs`) + `CLOJURESCRIPT_VERSION` (default: `latest`)
-  - `--rust` + `RUST_VERSION` (default: `1.89.0`)
-  - `--claude` (aliases: `--claude-code`, `--cc`, `--claudecode`) + `CLAUDE_CODE_VERSION` (default: `latest`)
-  - `--opencode` + `OPENCODE_VERSION` (default: `latest`)
-  - `--pi` (alias: `--pi-agent`) + `PI_VERSION` (default: `latest`)
-  - `--codex` + `CODEX_VERSION` (default: `latest`)
-  - `--copilot` (aliases: `--github-copilot`, `--githubcopilot`) + `COPILOT_VERSION` (default: `latest`)
+  - `--build` (alias: `--build-tools`) + `BUILD_ESSENTIAL_VERSION`
+  - `--docker` + `DOCKER_VERSION`
+  - `--gh` (aliases: `--github`, `--github-cli`, `--githubcli`) + `GH_VERSION`
+  - `--mise` + `MISE_VERSION`
+  - `--psql` (aliases: `--postgres`, `--postgresql`) + `PSQL_VERSION`
+  - `--go` (alias: `--golang`) + `GO_VERSION`
+  - `--java` (aliases: `--jdk`, `--clojure`, `--clj`, `--clojurescript`, `--cljs`) + `JAVA_VERSION`
+  - `--clojure` (alias: `--clj`) + `CLOJURE_VERSION`
+  - `--clojurescript` (alias: `--cljs`) + `CLOJURESCRIPT_VERSION`
+  - `--rust` + `RUST_VERSION`
+  - `--claude` (aliases: `--claude-code`, `--cc`, `--claudecode`) + `CLAUDE_CODE_VERSION`
+  - `--opencode` + `OPENCODE_VERSION`
+  - `--pi` (alias: `--pi-agent`) + `PI_VERSION`
+  - `--codex` + `CODEX_VERSION`
+  - `--copilot` (aliases: `--github-copilot`, `--githubcopilot`) + `COPILOT_VERSION`
 - Aggregates:
   - `--all-tools` (all non-agent tool features)
   - `--all-agents` (all agent features)
