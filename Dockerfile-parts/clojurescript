@@ -1,0 +1,17 @@
+ARG CLOJURESCRIPT_VERSION=latest
+
+RUN install -d /usr/local/bin \
+    && printf '%s\n' \
+      '#!/usr/bin/env bash' \
+      'set -euo pipefail' \
+      'repl_env_set=0' \
+      'for arg in "$@"; do' \
+      '  case "$arg" in -re|--repl-env) repl_env_set=1 ;; esac' \
+      'done' \
+      'if [ "$repl_env_set" -eq 0 ]; then' \
+      '  set -- -re node "$@"' \
+      'fi' \
+      'export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-} -Djava.awt.headless=true"' \
+      "exec clojure -Sdeps '{:deps {org.clojure/clojurescript {:mvn/version \"${CLOJURESCRIPT_VERSION}\"}}}' -M -m cljs.main \"\$@\"" \
+      > /usr/local/bin/cljs \
+    && chmod +x /usr/local/bin/cljs

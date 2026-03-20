@@ -1,0 +1,10 @@
+ARG CLOJURE_VERSION=latest
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends rlwrap \
+    && rm -rf /var/lib/apt/lists/* \
+    && tmpdir="$(mktemp -d)" \
+    && curl -fsSL "https://github.com/clojure/brew-install/releases/download/${CLOJURE_VERSION}/linux-install.sh" -o "$tmpdir/linux-install.sh" \
+    && chmod +x "$tmpdir/linux-install.sh" \
+    && "$tmpdir/linux-install.sh" --prefix /usr/local \
+    && rm -rf "$tmpdir"

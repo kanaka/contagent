@@ -51,6 +51,31 @@ features:
       env: GO_VERSION
       default: "1.26.0"
 
+  - names: [java, jdk, clojure, clj, clojurescript, cljs, all, all-tools]
+    path: Dockerfile-parts/java
+    version:
+      env: JAVA_VERSION
+      default: latest
+      resolve: curl -fsSL "https://api.adoptium.net/v3/info/available_releases" | jq -r '.most_recent_lts'
+
+  - names: [clojure, clj, clojurescript, cljs, all, all-tools]
+    path: Dockerfile-parts/clojure
+    mounts:
+      - "~/.clojure:~/.clojure"
+      - "~/.m2:~/.m2"
+      - "~/.gitlibs:~/.gitlibs"
+    version:
+      env: CLOJURE_VERSION
+      default: latest
+      resolve: curl -fsSL "https://api.github.com/repos/clojure/brew-install/releases/latest" | jq -r '.tag_name'
+
+  - names: [clojurescript, cljs, all, all-tools]
+    path: Dockerfile-parts/clojurescript
+    version:
+      env: CLOJURESCRIPT_VERSION
+      default: latest
+      resolve: curl -fsSL "https://repo1.maven.org/maven2/org/clojure/clojurescript/maven-metadata.xml" | grep -oPm1 '(?<=<release>)[^<]+'
+
   - names: [rust, all, all-tools]
     path: Dockerfile-parts/rust
     version:

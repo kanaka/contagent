@@ -1,0 +1,19 @@
+ARG JAVA_VERSION=latest
+
+ENV JAVA_HOME=/usr/local/jdk
+ENV PATH=${JAVA_HOME}/bin:${PATH}
+
+RUN arch="$(dpkg --print-architecture)" \
+    && case "$arch" in \
+      amd64) api_arch=x64 ;; \
+      arm64) api_arch=aarch64 ;; \
+      *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL "https://api.adoptium.net/v3/binary/latest/${JAVA_VERSION}/ga/linux/${api_arch}/jdk/hotspot/normal/eclipse" -o /tmp/jdk.tar.gz \
+    && tmpdir="$(mktemp -d)" \
+    && tar -C "$tmpdir" -xzf /tmp/jdk.tar.gz \
+    && jdk_dir="$(find "$tmpdir" -mindepth 1 -maxdepth 1 -type d | head -n1)" \
+    && [ -n "$jdk_dir" ] \
+    && rm -rf /usr/local/jdk \
+    && mv "$jdk_dir" /usr/local/jdk \
+    && rm -rf "$tmpdir" /tmp/jdk.tar.gz
