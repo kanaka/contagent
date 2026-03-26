@@ -13,6 +13,8 @@ Usage: ./contagent.sh [options] [command ...]
 Options:
   --docker-socket              Mount host Docker socket into container
   --no-docker-socket           Do not mount host Docker socket
+  --gh-config                  Mount host ~/.config/gh into container
+  --no-gh-config               Do not mount host ~/.config/gh
   --extra-groups <gid[,gid]>   Append supplementary group GIDs for this run
   -h, --help                   Show this help
 EOF
@@ -23,6 +25,7 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 CONTAGENT_IMAGE=${CONTAGENT_IMAGE:-contagent:latest}
 CONTAGENT_DOCKER_SOCKET=${CONTAGENT_DOCKER_SOCKET:-}
+CONTAGENT_GH_CONFIG=${CONTAGENT_GH_CONFIG:-}
 CONTAGENT_EXTRA_GROUP_GIDS=${CONTAGENT_EXTRA_GROUP_GIDS:-}
 
 while [ "$#" -gt 0 ]; do
@@ -32,6 +35,12 @@ while [ "$#" -gt 0 ]; do
       ;;
     --no-docker-socket)
       CONTAGENT_DOCKER_SOCKET=
+      ;;
+    --gh-config)
+      CONTAGENT_GH_CONFIG=1
+      ;;
+    --no-gh-config)
+      CONTAGENT_GH_CONFIG=
       ;;
     --extra-groups)
       shift
@@ -82,6 +91,7 @@ need_cmd jq
 image_inspect=$(docker image inspect "$CONTAGENT_IMAGE" 2>/dev/null) || {
   die "image ${CONTAGENT_IMAGE} is not available locally; build it first with ./build-contagent.sh"
 }
+gh_mounts=$(printf '%s' "$image_inspect" | jq -r '.[0].Config.Labels["io.contagent.component.gh.mounts"] // ""')
 
 docker_args=(
   --rm
@@ -105,6 +115,7 @@ docker_args+=(
 
 while IFS= read -r mount_entry; do
   [[ "$mount_entry" == *:* ]] || { warn "ignoring invalid mount spec from labels: $mount_entry"; continue; }
+  [ -z "$CONTAGENT_GH_CONFIG" ] && [[ ",$gh_mounts," == *",$mount_entry,"* ]] && continue
   src=${mount_entry%%:*}; dst=${mount_entry#*:}
   [[ "$src" == '~' || "$src" == '~/'* ]] && src="$host_home${src#\~}"
   [[ "$dst" == '~' || "$dst" == '~/'* ]] && dst="$host_home${dst#\~}"
@@ -131,12 +142,18 @@ docker_sock_candidates=(
 )
 
 CONTAGENT_DOCKER_SOCKET=${CONTAGENT_DOCKER_SOCKET//[[:space:]]/}
+CONTAGENT_GH_CONFIG=${CONTAGENT_GH_CONFIG//[[:space:]]/}
 docker_capable=$(printf '%s' "$image_inspect" | jq -r 'if (.[0].Config.Labels // {} | has("io.contagent.component.docker.version")) then "1" else "" end')
+gh_capable=$(printf '%s' "$image_inspect" | jq -r 'if (.[0].Config.Labels // {} | has("io.contagent.component.gh.version")) then "1" else "" end')
 
 [ -n "$CONTAGENT_DOCKER_SOCKET" ] && [ -z "$docker_capable" ] &&
   warn "docker socket requested, but image has no docker component"
 [ -z "$CONTAGENT_DOCKER_SOCKET" ] && [ -n "$docker_capable" ] &&
   warn "image has docker component, but docker socket is not requested"
+[ -n "$CONTAGENT_GH_CONFIG" ] && [ -z "$gh_capable" ] &&
+  warn "gh config mount requested, but image has no gh component"
+[ -z "$CONTAGENT_GH_CONFIG" ] && [ -n "$gh_capable" ] &&
+  warn "image has gh component, but gh config mount is not requested"
 
 if [ -n "$CONTAGENT_DOCKER_SOCKET" ]; then
   mounted_docker_sock=0
@@ -151,6 +168,14 @@ if [ -n "$CONTAGENT_DOCKER_SOCKET" ]; then
   [ "$mounted_docker_sock" -eq 1 ] || {
     warn "Docker socket enabled but not found; in-container docker commands may not work"
   }
+fi
+
+gh_hosts_file="$host_home/.config/gh/hosts.yml"
+if [ -n "$CONTAGENT_GH_CONFIG" ] && [ -n "$gh_capable" ] && [ -f "$gh_hosts_file" ] && {
+  grep -Eq '^[[:space:]]*oauth_token:[[:space:]]*' "$gh_hosts_file" ||
+  { grep -Eq '^[[:space:]]*user:[[:space:]]*' "$gh_hosts_file" && grep -Eq '^[[:space:]]*password:[[:space:]]*' "$gh_hosts_file"; }
+}; then
+  warn "gh config mount is enabled and ~/.config/gh/hosts.yml appears to contain GitHub auth credentials; mounting ~/.config/gh may expose broad GitHub access"
 fi
 
 if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ]; then

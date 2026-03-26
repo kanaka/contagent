@@ -108,9 +108,11 @@ Runtime environment:
 
 - `CONTAGENT_IMAGE` (default: `contagent:latest`)
 - `CONTAGENT_DOCKER_SOCKET` (non-empty enables docker socket mount; empty disables)
+- `CONTAGENT_GH_CONFIG` (non-empty enables `~/.config/gh` mount when available; empty disables)
 - `CONTAGENT_EXTRA_GROUP_GIDS` (non-empty comma-separated gid list applies supplementary groups; empty disables)
 - CLI options:
   - `--docker-socket` / `--no-docker-socket`
+  - `--gh-config` / `--no-gh-config`
   - `--extra-groups <gid[,gid]>` (appends to `CONTAGENT_EXTRA_GROUP_GIDS`)
 
 Examples:
@@ -125,6 +127,9 @@ CONTAGENT_IMAGE=contagent:20260302_101530-gabc123 ./contagent.sh
 CONTAGENT_DOCKER_SOCKET=1 ./contagent.sh docker ps
 ./contagent.sh --docker-socket docker ps
 
+CONTAGENT_GH_CONFIG=1 ./contagent.sh gh auth status
+./contagent.sh --gh-config gh auth status
+
 CONTAGENT_EXTRA_GROUP_GIDS=970 ./contagent.sh
 ./contagent.sh --extra-groups 970,971
 ```
@@ -136,7 +141,7 @@ Contagent reduces exposure; it is not a hard security sandbox.
 Mounted by default:
 
 - Current project directory (same absolute path).
-- Feature-specific mounts
+- Feature-specific mounts (except `gh` config mount)
 - Base feature mounts include:
   - `~/.local/state/contagent` -> `~/.local/state/contagent`
   - `~/.cache/contagent` -> `/var/cache/contagent`
@@ -145,6 +150,7 @@ Mounted by default:
 Mounted only when enabled:
 
 - Docker socket (`CONTAGENT_DOCKER_SOCKET=1` or `--docker-socket`) when detected.
+- `~/.config/gh` (`CONTAGENT_GH_CONFIG=1` or `--gh-config`) when `gh` feature is present.
 
 Not mounted by default:
 
@@ -154,6 +160,7 @@ Not mounted by default:
 Important implications:
 
 - Docker socket access is powerful and can affect the host.
+- `~/.config/gh` may contain high-privilege GitHub credentials/tokens.
 - SSH agent forwarding allows use of loaded keys via the socket.
 - Run contagent only for projects and sessions where this trust model fits.
 

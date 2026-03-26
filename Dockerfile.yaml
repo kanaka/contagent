@@ -69,6 +69,8 @@ features:
 
   - names: [gh, github, github-cli, githubcli, all, all-tools]
     path: Dockerfile-parts/gh
+    mounts:
+      - "~/.config/gh:~/.config/gh"
     version:
       env: GH_VERSION
       default: latest
