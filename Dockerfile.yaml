@@ -65,7 +65,7 @@ features:
     version:
       env: CLOJURESCRIPT_VERSION
       default: latest
-      resolve: curl -fsSL "https://repo1.maven.org/maven2/org/clojure/clojurescript/maven-metadata.xml" | grep -oPm1 '(?<=<release>)[^<]+'
+      resolve: curl -fsSL "https://repo1.maven.org/maven2/org/clojure/clojurescript/maven-metadata.xml" | awk 'match($0,/<release>[^<]+<\/release>/){v=substr($0,RSTART+9,RLENGTH-19)} END{if(v)print v; else exit 1}'
 
   - names: [gh, github, github-cli, githubcli, all, all-tools]
     path: Dockerfile-parts/gh
