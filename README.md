@@ -97,6 +97,7 @@ Build-time options:
 Both accept any token listed in a feature's `names` array in `contagent.yaml`.
 Feature mounts are defined in each feature's `mounts` list and propagated into image labels at build time (`io.contagent.component.<name>.mounts`).
 Feature versions are also labeled (`io.contagent.component.<name>.version`).
+The image also embeds `io.contagent.schema.version`, `io.contagent.manifest.json` (full `contagent.yaml` as JSON), and `io.contagent.manifest.features` (selected feature names as a JSON array).
 
 Build implementation notes:
 

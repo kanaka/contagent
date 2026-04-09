@@ -4,6 +4,7 @@
 # ///
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -48,6 +49,10 @@ def resolve(label: str, feature: dict, env: dict[str, str]) -> tuple[str, list[s
     return value, (["--build-arg", f"{env_name}={value}"] if env_name else [])
 
 
+def escape_docker_label_value(value: str) -> str:
+    return json.dumps(value).replace("$", r"\$")
+
+
 def main() -> None:
     argv = sys.argv[1:]
     if any(a in ("-h", "--help") for a in argv):
@@ -71,14 +76,18 @@ def main() -> None:
 
     if not manifest_file.exists():
         die(f"missing manifest: {manifest_file}")
-    features = (yaml.safe_load(manifest_file.read_text()) or {}).get("features") or []
+    manifest = yaml.safe_load(manifest_file.read_text()) or {}
+    features = manifest.get("features") or []
     if not features:
         die("manifest has no features")
+    schema_version = manifest.get("version", 2)
+    manifest_json = json.dumps(manifest, separators=(",", ":"))
 
     docker_args: list[str] = []
     motd: list[str] = []
     labels: list[str] = []
     parts: list[str] = []
+    selected_feature_names: list[str] = []
 
     print("Building image with selected features:")
     for f in features:
@@ -91,6 +100,8 @@ def main() -> None:
             unknown.discard(n)
         if not (f.get("required", False) or any(n in wanted for n in names)):
             continue
+
+        selected_feature_names.append(label)
 
         part = root / path
         if not part.exists():
@@ -106,15 +117,21 @@ def main() -> None:
             print(f"  {label}")
 
         mounts = ",".join(f.get("mounts") or [])
-        esc_value = str(value).replace('"', r'\"')
-        esc_mounts = mounts.replace('"', r'\"')
-        labels.append(f'io.contagent.component.{label}.version="{esc_value}"')
-        labels.append(f'io.contagent.component.{label}.mounts="{esc_mounts}"')
+        esc_value = escape_docker_label_value(str(value))
+        esc_mounts = escape_docker_label_value(mounts)
+        labels.append(f'io.contagent.component.{label}.version={esc_value}')
+        labels.append(f'io.contagent.component.{label}.mounts={esc_mounts}')
 
     if unknown:
         die(f"unknown feature(s): {','.join(sorted(unknown))}")
     if not parts:
         die("no features selected")
+
+    features_json = json.dumps(selected_feature_names, separators=(",", ":"))
+
+    labels.append(f'io.contagent.schema.version={escape_docker_label_value(str(schema_version))}')
+    labels.append(f'io.contagent.manifest.json={escape_docker_label_value(manifest_json)}')
+    labels.append(f'io.contagent.manifest.features={escape_docker_label_value(features_json)}')
 
     dockerfile.write_text("\n".join(parts) + ("\nLABEL " + " ".join(labels) + "\n" if labels else ""))
     motd_file.write_text("contagent tool versions:\n" + "\n".join(f"  - {x}" for x in motd) + ("\n" if motd else ""))

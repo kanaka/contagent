@@ -23,6 +23,12 @@ motd_file="$script_dir/.contagent-motd.generated"
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 need_cmd() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
+escape_docker_label_value() {
+  local value
+  value=$(jq -Rn --arg s "$1" '$s|tojson' -r)
+  value=${value//$/\\$}
+  printf '%s' "$value"
+}
 
 for arg in "$@"; do [ "$arg" = -h ] || [ "$arg" = --help ] && { usage; exit 0; }; done
 
@@ -34,7 +40,9 @@ need_cmd gzip
 yq_cmd=(docker run --rm -i mikefarah/yq:4)
 command -v yq >/dev/null 2>&1 && yq_cmd=(yq)
 
-feature_rows=$(cat "$manifest_file" | "${yq_cmd[@]}" -r '.features[] | @json')
+manifest_json=$("${yq_cmd[@]}" -r '. | @json' < "$manifest_file")
+schema_version=$(printf '%s' "$manifest_json" | jq -r '.version // 2')
+feature_rows=$(printf '%s' "$manifest_json" | jq -c '.features[]?')
 
 [ -n "$feature_rows" ] || die "manifest has no features"
 
@@ -52,6 +60,7 @@ done
 docker_args=()
 motd_lines=()
 component_labels=()
+selected_feature_names=()
 
 echo "Building image with selected features:"
 while IFS= read -r feature; do
@@ -78,6 +87,7 @@ while IFS= read -r feature; do
   done
 
   [ "$select" -eq 1 ] || continue
+  selected_feature_names+=("$label")
   [ -f "$script_dir/$path" ] || die "missing Dockerfile part: $path"
   [ -s "$dockerfile" ] && printf '\n' >> "$dockerfile"
   cat "$script_dir/$path" >> "$dockerfile"
@@ -98,13 +108,21 @@ while IFS= read -r feature; do
     echo "  $label"
   fi
 
-  esc_version=${version_value//\"/\\\"}
-  esc_mounts=${mounts_csv//\"/\\\"}
-  component_labels+=("io.contagent.component.${label}.version=\"$esc_version\"")
-  component_labels+=("io.contagent.component.${label}.mounts=\"$esc_mounts\"")
+  esc_version=$(escape_docker_label_value "$version_value")
+  esc_mounts=$(escape_docker_label_value "$mounts_csv")
+  component_labels+=("io.contagent.component.${label}.version=$esc_version")
+  component_labels+=("io.contagent.component.${label}.mounts=$esc_mounts")
 done <<<"$feature_rows"
 
 [ "${#unknown[@]}" -eq 0 ] || die "unknown feature(s): $(printf '%s\n' "${!unknown[@]}" | sort -u | paste -sd',' -)"
+
+features_json=$(jq -cn '$ARGS.positional' --args "${selected_feature_names[@]}")
+esc_schema_version=$(escape_docker_label_value "$schema_version")
+esc_manifest_json=$(escape_docker_label_value "$manifest_json")
+esc_features_json=$(escape_docker_label_value "$features_json")
+component_labels+=("io.contagent.schema.version=$esc_schema_version")
+component_labels+=("io.contagent.manifest.json=$esc_manifest_json")
+component_labels+=("io.contagent.manifest.features=$esc_features_json")
 
 [ -s "$dockerfile" ] || die "no features selected"
 
