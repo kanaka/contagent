@@ -94,14 +94,14 @@ Build-time options:
   - `--all` (all tool + agent features)
 
 `CONTAGENT_FEATURES` sets the default enabled feature list; CLI flags add to it.
-Both accept any token listed in a feature's `names` array in `Dockerfile.yaml`.
+Both accept any token listed in a feature's `names` array in `contagent.yaml`.
 Feature mounts are defined in each feature's `mounts` list and propagated into image labels at build time (`io.contagent.component.<name>.mounts`).
 Feature versions are also labeled (`io.contagent.component.<name>.version`).
 
 Build implementation notes:
 
-- Build composition is driven by `Dockerfile.yaml` and assembled from
-  `Dockerfile-parts/` into `.Dockerfile` on each build (`base` is always included).
+- Build composition is driven by `contagent.yaml` and assembled from
+  `Dockerfile-parts/` into `.Dockerfile.generated` on each build (`base` is always included).
 - Manifest parsing uses local `yq` when available, otherwise `mikefarah/yq` via Docker.
 
 Runtime environment:

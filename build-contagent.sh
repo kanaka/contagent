@@ -7,7 +7,7 @@ usage() {
   cat <<'EOF'
 Usage: ./build-contagent.sh [--<feature> ...]
 
-Features, aliases, order, snippets, and version rules come from Dockerfile.yaml.
+Features, aliases, order, snippets, and version rules come from contagent.yaml.
 Default features come from CONTAGENT_FEATURES.
 Uses local yq when available, otherwise falls back to mikefarah/yq:4 via docker.
 EOF
@@ -17,7 +17,7 @@ CONTAGENT_IMAGE_NAME=${CONTAGENT_IMAGE_NAME:-contagent}
 CONTAGENT_FEATURES=${CONTAGENT_FEATURES:-}
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-manifest_file="$script_dir/Dockerfile.yaml"
+manifest_file="$script_dir/contagent.yaml"
 dockerfile="$script_dir/.Dockerfile.generated"
 motd_file="$script_dir/.contagent-motd.generated"
 

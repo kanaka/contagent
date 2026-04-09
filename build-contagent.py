@@ -14,7 +14,7 @@ import yaml
 
 USAGE = """Usage: ./build-contagent.py [--<feature> ...]
 
-Features, aliases, order, snippets, and version rules come from Dockerfile.yaml.
+Features, aliases, order, snippets, and version rules come from contagent.yaml.
 Default features come from CONTAGENT_FEATURES.
 """
 
@@ -65,7 +65,7 @@ def main() -> None:
     unknown = set(wanted)
 
     root = Path(__file__).resolve().parent
-    manifest_file = root / "Dockerfile.yaml"
+    manifest_file = root / "contagent.yaml"
     dockerfile = root / ".Dockerfile.generated"
     motd_file = root / ".contagent-motd.generated"
 
