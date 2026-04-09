@@ -28,6 +28,7 @@ for arg in "$@"; do [ "$arg" = -h ] || [ "$arg" = --help ] && { usage; exit 0; }
 
 need_cmd docker
 need_cmd jq
+need_cmd gzip
 [ -f "$manifest_file" ] || die "missing manifest: $manifest_file"
 
 yq_cmd=(docker run --rm -i mikefarah/yq:4)

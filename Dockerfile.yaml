@@ -10,7 +10,7 @@ features:
     version:
       env: BUILD_ESSENTIAL_VERSION
       default: latest
-      resolve: page=$(curl -fsSL "https://packages.debian.org/bookworm/build-essential"); printf '%s\n' "$page" | grep -oE 'Package:[[:space:]]build-essential \([^)]+' | sed -E 's/.*\((.*)$/\1/'
+      resolve: curl -fsSL "https://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages.gz" | gzip -dc | awk '/^Package:[[:space:]]build-essential$/{f=1} f&&/^Version:[[:space:]]/{v=$2;f=0} END{print v}'
 
   - names: [docker, all, all-tools]
     path: Dockerfile-parts/docker
@@ -47,7 +47,7 @@ features:
     version:
       env: PSQL_VERSION
       default: latest
-      resolve: curl -fsSL "https://packages.debian.org/bookworm/postgresql-client" | grep -oE 'Package:[[:space:]]postgresql-client \([^)]+' | sed -E 's/.*\((.*)$/\1/' | head -n1
+      resolve: curl -fsSL "https://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages.gz" | gzip -dc | awk '/^Package:[[:space:]]postgresql-client$/{f=1} f&&/^Version:[[:space:]]/{v=$2;f=0} END{print v}'
 
   - names: [clojure, clj, clojurescript, cljs, all, all-tools]
     path: Dockerfile-parts/clojure

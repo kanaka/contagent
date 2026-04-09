@@ -25,7 +25,7 @@ keeping filesystem and credential exposure narrow and intentional.
 
 - Docker on host.
 - Bash 4+ for `contagent.sh` and `build-contagent.sh`.
-- `curl` and `jq` on host for resolving `latest` feature versions and image-label mount metadata.
+- `curl`, `jq`, and `gzip` on host for resolving `latest` feature versions and image-label mount metadata.
 
 ## Quick start
 

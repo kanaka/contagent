@@ -56,6 +56,8 @@ def main() -> None:
 
     if shutil.which("docker") is None:
         die("docker is required")
+    if shutil.which("gzip") is None:
+        die("gzip is required")
 
     env = os.environ
     image_name = env.get("CONTAGENT_IMAGE_NAME", "contagent")
