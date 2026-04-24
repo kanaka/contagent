@@ -182,5 +182,6 @@ features:
       default: latest
       resolve: ./voom-like-version.sh .
     volumes:
+      - { arg_name: contagent-state, source: ~/.contagent }
       - { arg_name: contagent-state, source: ~/.local/state/contagent }
       - { arg_name: contagent-state, source: ~/.cache/contagent, target: /var/cache/contagent }
