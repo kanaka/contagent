@@ -5,3 +5,6 @@
 .pi
 .Dockerfile.generated
 .contagent-motd.generated
+__pycache__/
+*.pyc
+tmp/
