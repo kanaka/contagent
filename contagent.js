@@ -6,6 +6,7 @@ const USAGE = `Usage: ./contagent.js [options] [--] [command ...]
 
 Options:
   --<name>                    Enable a volume group from image metadata
+  --<name>=<dir>              Enable and replace '~' in that group's source paths with <dir>
   --no-<name>                 Disable a volume group from image metadata
   --show-options              Show image-defined --<name>/--no-<name> toggles and exit
   --extra-groups <gid[,gid]>  Append supplementary group GIDs for this run
@@ -141,12 +142,18 @@ function printOptions(image, model) {
 
 function parseCli(argv, model, initialExtraGroupsCsv) {
   const enabledByArg = new Map(model.optionOrder.map((name) => [name, model.includedOptions.get(name).safe]));
+  const sourceRootByArg = new Map();
   let showOptions = false;
   let extraGroupsCsv = initialExtraGroupsCsv;
   let command = [];
   let helpRequested = false;
-  const applyToggle = (arg, name, nextState) => {
-    if (model.includedOptions.has(name)) return void enabledByArg.set(name, nextState);
+  const applyToggle = (arg, name, nextState, sourceRoot) => {
+    if (model.includedOptions.has(name)) {
+      enabledByArg.set(name, nextState);
+      if (!nextState || sourceRoot == null) sourceRootByArg.delete(name);
+      else sourceRootByArg.set(name, sourceRoot);
+      return;
+    }
     if (!model.allOptions.has(name)) die(`unknown option: ${arg}`);
     const features = model.allOptions.get(name).features.join(",");
     const flag = nextState ? `--${name}` : `--no-${name}`;
@@ -167,9 +174,24 @@ function parseCli(argv, model, initialExtraGroupsCsv) {
       continue;
     }
 
+    if (arg.startsWith("--no-")) {
+      if (arg.includes("=")) die(`unknown option: ${arg}`);
+      applyToggle(arg, arg.slice(5), false, null);
+      i += 1;
+      continue;
+    }
+
     if (arg.startsWith("--")) {
-      const isNeg = arg.startsWith("--no-");
-      applyToggle(arg, isNeg ? arg.slice(5) : arg.slice(2), !isNeg);
+      const body = arg.slice(2);
+      const eq = body.indexOf("=");
+      if (eq >= 0) {
+        const name = body.slice(0, eq);
+        const sourceRoot = body.slice(eq + 1);
+        if (!sourceRoot) die(`option --${name} requires a value`);
+        applyToggle(arg, name, true, sourceRoot);
+      } else {
+        applyToggle(arg, body, true, null);
+      }
       i += 1;
       continue;
     }
@@ -179,7 +201,7 @@ function parseCli(argv, model, initialExtraGroupsCsv) {
     break;
   }
 
-  return { command, showOptions, helpRequested, extraGroupsCsv, enabledByArg };
+  return { command, showOptions, helpRequested, extraGroupsCsv, enabledByArg, sourceRootByArg };
 }
 
 function planRuntime(model, parsed, host) {
@@ -198,7 +220,10 @@ function planRuntime(model, parsed, host) {
   const byTarget = new Map();
   for (const row of model.includedRows) {
     if (!parsed.enabledByArg.get(row.argName)) continue;
-    const source = resolvePath(row.source, host.home, host.cwd);
+    let sourceValue = row.source;
+    const sourceRoot = parsed.sourceRootByArg.get(row.argName);
+    if (sourceRoot != null) sourceValue = sourceValue.split("~").join(sourceRoot);
+    const source = resolvePath(sourceValue, host.home, host.cwd);
     const mountPath = resolvePath(row.path, host.home, host.cwd);
     const list = byTarget.get(mountPath) || [];
     list.push({ source, file: row.file, readOnly: row.readOnly, createIfMissing: row.createIfMissing });

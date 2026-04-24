@@ -80,6 +80,17 @@ run_launcher_image() {
 }
 
 
+run_launcher_image_in_dir() {
+  local dir=$1
+  local image=$2
+  shift 2
+  (
+    cd "$dir"
+    CONTAGENT_IMAGE="$image" "$launcher" "$@"
+  )
+}
+
+
 expect_fail_contains() {
   local expected=$1
   shift
@@ -203,6 +214,32 @@ test_default_off_toggle_semantics() {
 }
 
 
+test_arg_override_semantics() {
+  local tmp
+  local home
+  local work
+
+  tmp=$(mktemp -d)
+  home="$tmp/home"
+  work="$tmp/work"
+  mkdir -p "$home" "$work"
+
+  HOME="$home" run_launcher_image_in_dir "$work" "$img_cli" --inc=. true >/dev/null 2>/dev/null
+  [ -e "$work/.smoke-inc" ]
+  [ ! -e "$home/.smoke-inc" ]
+
+  HOME="$home" run_launcher_image "$img_cli" "--inc=~/.alt" true >/dev/null 2>/dev/null
+  [ -e "$home/.alt/.smoke-inc" ]
+
+  rm -rf "$tmp"
+}
+
+
+test_arg_override_requires_value() {
+  expect_fail_contains "requires a value" run_launcher_image "$img_cli" --inc= true
+}
+
+
 test_sources_requires_existing_semantics() {
   expect_fail_contains "no existing source found for target /work/multi among 2 candidates" run_launcher_image "$img_sources_missing" true
 }
@@ -283,6 +320,8 @@ run_step "schema label missing error" test_schema_missing_rejected
 run_step "schema unsupported error" test_schema_unsupported_rejected
 run_step "source mount create-if-missing behavior" test_source_create_semantics
 run_step "default off toggle behavior" test_default_off_toggle_semantics
+run_step "arg override rewrites source roots" test_arg_override_semantics
+run_step "arg override requires non-empty value" test_arg_override_requires_value
 run_step "sources mount requires existing candidate" test_sources_requires_existing_semantics
 
 run_step "claude cli availability" run_in_launcher 'command -v claude >/dev/null && claude --version >/dev/null || true'

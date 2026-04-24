@@ -12,6 +12,7 @@ Usage: ./contagent.sh [options] [--] [command ...]
 
 Options:
   --<name>                    Enable a volume group from image metadata
+  --<name>=<dir>              Enable and replace '~' in that group's source paths with <dir>
   --no-<name>                 Disable a volume group from image metadata
   --show-options              Show image-defined --<name>/--no-<name> toggles and exit
   --extra-groups <gid[,gid]>  Append supplementary group GIDs for this run
@@ -90,6 +91,7 @@ declare -A all_opt_features=()
 declare -A included_opt_safe=()
 declare -A included_opt_features=()
 declare -A enabled_opt=()
+declare -A source_root_override=()
 declare -a included_rows=()
 declare -a env_rows=()
 
@@ -213,12 +215,31 @@ while [ "$i" -lt "${#argv[@]}" ]; do
       extra_groups_csv=$(append_csv "$extra_groups_csv" "${arg#--extra-groups=}")
       i=$((i + 1))
       ;;
+    --no-*=*)
+      die "unknown option: $arg"
+      ;;
     --no-*)
       name=${arg#--no-}
       if [ -n "${included_opt_safe[$name]:-}" ]; then
         enabled_opt[$name]=0
+        unset 'source_root_override[$name]'
       elif [ -n "${all_opt_features[$name]:-}" ]; then
         die "option --no-$name is known but not included in image (feature(s): ${all_opt_features[$name]})"
+      else
+        die "unknown option: $arg"
+      fi
+      i=$((i + 1))
+      ;;
+    --*=*)
+      name=${arg#--}
+      dir=${name#*=}
+      name=${name%%=*}
+      [ -n "$dir" ] || die "option --$name requires a value"
+      if [ -n "${included_opt_safe[$name]:-}" ]; then
+        enabled_opt[$name]=1
+        source_root_override[$name]=$dir
+      elif [ -n "${all_opt_features[$name]:-}" ]; then
+        die "option --$name is known but not included in image (feature(s): ${all_opt_features[$name]})"
       else
         die "unknown option: $arg"
       fi
@@ -228,6 +249,7 @@ while [ "$i" -lt "${#argv[@]}" ]; do
       name=${arg#--}
       if [ -n "${included_opt_safe[$name]:-}" ]; then
         enabled_opt[$name]=1
+        unset 'source_root_override[$name]'
       elif [ -n "${all_opt_features[$name]:-}" ]; then
         die "option --$name is known but not included in image (feature(s): ${all_opt_features[$name]})"
       else
@@ -273,7 +295,12 @@ for row in "${included_rows[@]}"; do
   IFS=$'\t' read -r arg_name source target file_flag read_only create_if_missing <<<"$row"
   [ "${enabled_opt[$arg_name]:-0}" -eq 1 ] || continue
 
-  src=$(resolve_path "$source" "$host_home" "$workdir")
+  source_value=$source
+  if [ -n "${source_root_override[$arg_name]:-}" ]; then
+    source_value=${source_value//\~/${source_root_override[$arg_name]}}
+  fi
+
+  src=$(resolve_path "$source_value" "$host_home" "$workdir")
   dst=$(resolve_path "$target" "$host_home" "$workdir")
   candidate="$src"$'\t'"$read_only"$'\t'"$file_flag"$'\t'"$create_if_missing"
 
