@@ -147,18 +147,22 @@ function parseCli(argv, model, initialExtraGroupsCsv) {
   let extraGroupsCsv = initialExtraGroupsCsv;
   let command = [];
   let helpRequested = false;
-  const applyToggle = (arg, name, nextState, sourceRoot) => {
+
+  const applyOption = (arg, name, nextState, sourceRoot = null) => {
     if (model.includedOptions.has(name)) {
       enabledByArg.set(name, nextState);
       if (!nextState || sourceRoot == null) sourceRootByArg.delete(name);
       else sourceRootByArg.set(name, sourceRoot);
       return;
     }
-    if (!model.allOptions.has(name)) die(`unknown option: ${arg}`);
-    const features = model.allOptions.get(name).features.join(",");
-    const flag = nextState ? `--${name}` : `--no-${name}`;
-    die(`option ${flag} is known but not included in image (feature(s): ${features})`);
+    if (model.allOptions.has(name)) {
+      const features = model.allOptions.get(name).features.join(",");
+      const flag = nextState ? `--${name}` : `--no-${name}`;
+      die(`option ${flag} is known but not included in image (feature(s): ${features})`);
+    }
+    die(`unknown option: ${arg}`);
   };
+
   let i = 0;
   while (i < argv.length) {
     const arg = argv[i];
@@ -176,7 +180,7 @@ function parseCli(argv, model, initialExtraGroupsCsv) {
 
     if (arg.startsWith("--no-")) {
       if (arg.includes("=")) die(`unknown option: ${arg}`);
-      applyToggle(arg, arg.slice(5), false, null);
+      applyOption(arg, arg.slice(5), false);
       i += 1;
       continue;
     }
@@ -184,13 +188,12 @@ function parseCli(argv, model, initialExtraGroupsCsv) {
     if (arg.startsWith("--")) {
       const body = arg.slice(2);
       const eq = body.indexOf("=");
-      if (eq >= 0) {
+      if (eq < 0) applyOption(arg, body, true);
+      else {
         const name = body.slice(0, eq);
         const sourceRoot = body.slice(eq + 1);
         if (!sourceRoot) die(`option --${name} requires a value`);
-        applyToggle(arg, name, true, sourceRoot);
-      } else {
-        applyToggle(arg, body, true, null);
+        applyOption(arg, name, true, sourceRoot);
       }
       i += 1;
       continue;
@@ -220,9 +223,8 @@ function planRuntime(model, parsed, host) {
   const byTarget = new Map();
   for (const row of model.includedRows) {
     if (!parsed.enabledByArg.get(row.argName)) continue;
-    let sourceValue = row.source;
     const sourceRoot = parsed.sourceRootByArg.get(row.argName);
-    if (sourceRoot != null) sourceValue = sourceValue.split("~").join(sourceRoot);
+    const sourceValue = sourceRoot == null ? row.source : row.source.split("~").join(sourceRoot);
     const source = resolvePath(sourceValue, host.home, host.cwd);
     const mountPath = resolvePath(row.path, host.home, host.cwd);
     const list = byTarget.get(mountPath) || [];

@@ -50,6 +50,24 @@ append_feature_csv() {
   [ -n "$csv" ] && printf '%s,%s' "$csv" "$feature" || printf '%s' "$feature"
 }
 
+apply_option_toggle() {
+  local arg=$1 name=$2 state=$3 override=${4:-} flag
+  if [ -n "${included_opt_safe[$name]:-}" ]; then
+    enabled_opt[$name]=$state
+    if [ "$state" -eq 1 ] && [ -n "$override" ]; then
+      source_root_override[$name]=$override
+    else
+      unset 'source_root_override[$name]'
+    fi
+    return
+  fi
+  if [ -n "${all_opt_features[$name]:-}" ]; then
+    [ "$state" -eq 1 ] && flag="--$name" || flag="--no-$name"
+    die "option $flag is known but not included in image (feature(s): ${all_opt_features[$name]})"
+  fi
+  die "unknown option: $arg"
+}
+
 print_options() {
   local image=$1 name state
   if [ "${#option_order[@]}" -eq 0 ]; then
@@ -220,40 +238,18 @@ while [ "$i" -lt "${#argv[@]}" ]; do
       ;;
     --no-*)
       name=${arg#--no-}
-      if [ -n "${included_opt_safe[$name]:-}" ]; then
-        enabled_opt[$name]=0
-        unset 'source_root_override[$name]'
-      elif [ -n "${all_opt_features[$name]:-}" ]; then
-        die "option --no-$name is known but not included in image (feature(s): ${all_opt_features[$name]})"
-      else
-        die "unknown option: $arg"
-      fi
-      i=$((i + 1))
-      ;;
-    --*=*)
-      name=${arg#--}
-      dir=${name#*=}
-      name=${name%%=*}
-      [ -n "$dir" ] || die "option --$name requires a value"
-      if [ -n "${included_opt_safe[$name]:-}" ]; then
-        enabled_opt[$name]=1
-        source_root_override[$name]=$dir
-      elif [ -n "${all_opt_features[$name]:-}" ]; then
-        die "option --$name is known but not included in image (feature(s): ${all_opt_features[$name]})"
-      else
-        die "unknown option: $arg"
-      fi
+      apply_option_toggle "$arg" "$name" 0
       i=$((i + 1))
       ;;
     --*)
-      name=${arg#--}
-      if [ -n "${included_opt_safe[$name]:-}" ]; then
-        enabled_opt[$name]=1
-        unset 'source_root_override[$name]'
-      elif [ -n "${all_opt_features[$name]:-}" ]; then
-        die "option --$name is known but not included in image (feature(s): ${all_opt_features[$name]})"
+      body=${arg#--}
+      if [[ "$body" == *=* ]]; then
+        name=${body%%=*}
+        dir=${body#*=}
+        [ -n "$dir" ] || die "option --$name requires a value"
+        apply_option_toggle "$arg" "$name" 1 "$dir"
       else
-        die "unknown option: $arg"
+        apply_option_toggle "$arg" "$body" 1
       fi
       i=$((i + 1))
       ;;
@@ -296,9 +292,8 @@ for row in "${included_rows[@]}"; do
   [ "${enabled_opt[$arg_name]:-0}" -eq 1 ] || continue
 
   source_value=$source
-  if [ -n "${source_root_override[$arg_name]:-}" ]; then
-    source_value=${source_value//\~/${source_root_override[$arg_name]}}
-  fi
+  override=${source_root_override[$arg_name]:-}
+  [ -n "$override" ] && source_value=${source_value//\~/$override}
 
   src=$(resolve_path "$source_value" "$host_home" "$workdir")
   dst=$(resolve_path "$target" "$host_home" "$workdir")

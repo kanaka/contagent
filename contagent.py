@@ -207,6 +207,21 @@ def main() -> None:
     meta = build_meta(manifest, selected)
     enabled = {name: meta["included_opts"][name]["safe"] for name in meta["option_order"]}
     source_roots: dict[str, str] = {}
+
+    def apply_option(arg: str, name: str, state: bool, source_root: str | None = None) -> None:
+        if name in meta["included_opts"]:
+            enabled[name] = state
+            if not state or source_root is None:
+                source_roots.pop(name, None)
+            else:
+                source_roots[name] = source_root
+            return
+        if name in meta["all_opts"]:
+            features = ",".join(meta["all_opts"][name]["features"])
+            flag = f"--{name}" if state else f"--no-{name}"
+            die(f"option {flag} is known but not included in image (feature(s): {features})")
+        die(f"unknown option: {arg}")
+
     show_options = False
     argv = sys.argv[1:]
     i = 0
@@ -233,36 +248,16 @@ def main() -> None:
         elif arg.startswith("--no-"):
             if "=" in arg:
                 die(f"unknown option: {arg}")
-            name = arg[5:]
-            if name in meta["included_opts"]:
-                enabled[name] = False
-                source_roots.pop(name, None)
-            elif name in meta["all_opts"]:
-                features = ",".join(meta["all_opts"][name]["features"])
-                die(f"option --no-{name} is known but not included in image (feature(s): {features})")
-            else:
-                die(f"unknown option: {arg}")
+            apply_option(arg, arg[5:], False)
         elif arg.startswith("--"):
             body = arg[2:]
             if "=" in body:
                 name, source_root = body.split("=", 1)
                 if not source_root:
                     die(f"option --{name} requires a value")
+                apply_option(arg, name, True, source_root)
             else:
-                name = body
-                source_root = ""
-
-            if name in meta["included_opts"]:
-                enabled[name] = True
-                if source_root:
-                    source_roots[name] = source_root
-                else:
-                    source_roots.pop(name, None)
-            elif name in meta["all_opts"]:
-                features = ",".join(meta["all_opts"][name]["features"])
-                die(f"option --{name} is known but not included in image (feature(s): {features})")
-            else:
-                die(f"unknown option: {arg}")
+                apply_option(arg, body, True)
         elif arg.startswith("-"):
             die(f"unknown option: {arg}")
         else:
@@ -294,10 +289,8 @@ def main() -> None:
     for row in meta["rows"]:
         if not enabled.get(row["arg_name"], False):
             continue
-        source_value = row["source"]
         source_root = source_roots.get(row["arg_name"])
-        if source_root is not None:
-            source_value = source_value.replace("~", source_root)
+        source_value = row["source"] if source_root is None else row["source"].replace("~", source_root)
         src = resolve_path(source_value, host_home, workdir)
         dst = resolve_path(row["path"], host_home, workdir)
         if dst not in target_candidates:
