@@ -234,9 +234,9 @@ missing_b="/tmp/contagent-smoke-missing-b-${$}"
 manifest_cli=$(jq -cn '{
   version: 2,
   features: [
-    {name: "inc", volumes: [{arg_name: "inc", source: "~/.smoke-inc"}]},
-    {name: "offfeat", volumes: [{arg_name: "offopt", default: false, source: "~/.smoke-off"}]},
-    {name: "hidden", volumes: [{arg_name: "hidden", source: "~/.smoke-hidden"}]}
+    {name: "inc", volumes: [{arg_name: "inc", path: "~/.smoke-inc"}]},
+    {name: "offfeat", volumes: [{arg_name: "offopt", default: false, path: "~/.smoke-off"}]},
+    {name: "hidden", volumes: [{arg_name: "hidden", path: "~/.smoke-hidden"}]}
   ]
 }')
 selected_cli='["inc","offfeat"]'
@@ -244,7 +244,7 @@ selected_cli='["inc","offfeat"]'
 manifest_sources_missing=$(jq -cn --arg a "$missing_a" --arg b "$missing_b" '{
   version: 2,
   features: [
-    {name: "multi", volumes: [{arg_name: "multi", sources: [$a, $b], target: "/work/multi"}]}
+    {name: "multi", volumes: [{arg_name: "multi", sources: [$a, $b], path: "/work/multi"}]}
   ]
 }')
 selected_sources='["multi"]'

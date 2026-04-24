@@ -103,23 +103,47 @@ while IFS= read -r feature_json; do
     arg_name=$(printf '%s' "$volume_json" | jq -r '.arg_name // "" | tostring')
     [ -n "$arg_name" ] || continue
 
-    target=$(printf '%s' "$volume_json" | jq -r '.target // "" | tostring')
+    mount_path=$(printf '%s' "$volume_json" | jq -r 'if .path != null and (.path | type) == "string" then .path else "" end')
+    [ -n "$mount_path" ] || die "invalid volume entry in feature $feature_name, arg $arg_name: path is required"
+
     safe=$(printf '%s' "$volume_json" | jq -r 'if .default == null then "true" elif .default then "true" else "false" end')
     file_flag=$(printf '%s' "$volume_json" | jq -r 'if .file == null then "false" elif .file then "true" else "false" end')
     read_only=$(printf '%s' "$volume_json" | jq -r 'if .read_only == null then "false" elif .read_only then "true" else "false" end')
 
-    if [ "$(printf '%s' "$volume_json" | jq -r 'if has("sources") and .sources != null then "1" else "" end')" = "1" ]; then
-      mapfile -t source_list < <(printf '%s' "$volume_json" | jq -r '.sources // [] | if type == "array" then .[] | tostring else empty end')
+    source_state=$(printf '%s' "$volume_json" | jq -r '
+      if has("source") and .source != null then
+        if (.source | type) == "string" and .source != "" then "set" else "__invalid__" end
+      else
+        "unset"
+      end
+    ')
+    [ "$source_state" != "__invalid__" ] || die "invalid volume entry in feature $feature_name, arg $arg_name: source is required"
+
+    has_sources=$(printf '%s' "$volume_json" | jq -r 'if .sources == null then "false" else "true" end')
+    if [ "$source_state" = "set" ] && [ "$has_sources" = "true" ]; then
+      die "invalid volume entry in feature $feature_name, arg $arg_name: use source or sources, not both"
+    fi
+
+    if [ "$has_sources" = "true" ]; then
+      sources_type=$(printf '%s' "$volume_json" | jq -r '.sources | type')
+      [ "$sources_type" = "array" ] || die "invalid volume entry in feature $feature_name, arg $arg_name: sources is required"
+
+      mapfile -t source_list < <(printf '%s' "$volume_json" | jq -r '.sources[]? | if type == "string" then . else "__invalid__" end')
+      [ "${#source_list[@]}" -gt 0 ] || die "invalid volume entry in feature $feature_name, arg $arg_name: sources is required"
+      for source in "${source_list[@]}"; do
+        [ "$source" != "__invalid__" ] || die "invalid volume entry in feature $feature_name, arg $arg_name: sources is required"
+        [ -n "$source" ] || die "invalid volume entry in feature $feature_name, arg $arg_name: sources is required"
+      done
       create_if_missing=false
+    elif [ "$source_state" = "set" ]; then
+      source_list=("$(printf '%s' "$volume_json" | jq -r '.source')")
+      create_if_missing=true
     else
-      source_list=("$(printf '%s' "$volume_json" | jq -r '.source // "" | tostring')")
+      source_list=("$mount_path")
       create_if_missing=true
     fi
 
     for source in "${source_list[@]}"; do
-      [ -n "$source" ] || continue
-      row_target=${target:-$source}
-
       if [ -z "${all_opt_features[$arg_name]+x}" ]; then
         all_opt_features[$arg_name]=$feature_name
       else
@@ -133,7 +157,7 @@ while IFS= read -r feature_json; do
         else
           included_opt_features[$arg_name]=$(append_feature_csv "${included_opt_features[$arg_name]}" "$feature_name")
         fi
-        included_rows+=("$arg_name"$'\t'"$source"$'\t'"$row_target"$'\t'"$file_flag"$'\t'"$read_only"$'\t'"$create_if_missing")
+        included_rows+=("$arg_name"$'\t'"$source"$'\t'"$mount_path"$'\t'"$file_flag"$'\t'"$read_only"$'\t'"$create_if_missing")
       fi
     done
   done < <(printf '%s' "$feature_json" | jq -c '.volumes // [] | if type == "array" then .[] else empty end | select(type == "object")')

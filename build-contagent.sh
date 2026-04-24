@@ -104,9 +104,20 @@ while IFS= read -r feature; do
     volume_arg_name=$(jq -r '.arg_name // "" | if type == "string" then . else "" end' <<<"$volume_row")
     [ -n "$volume_arg_name" ] || die "invalid volume entry in feature $label: arg_name is required"
 
-    has_source=$(jq -r 'if (.source != null and (.source | type) == "string" and .source != "") then "true" else "false" end' <<<"$volume_row")
+    volume_path=$(jq -r 'if (.path != null and (.path | type) == "string") then .path else "" end' <<<"$volume_row")
+    [ -n "$volume_path" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: path is required"
+
+    source_state=$(jq -r '
+      if has("source") and .source != null then
+        if (.source | type) == "string" and .source != "" then "set" else "__invalid__" end
+      else
+        "unset"
+      end
+    ' <<<"$volume_row")
+    [ "$source_state" != "__invalid__" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: source is required"
+
     has_sources=$(jq -r 'if .sources == null then "false" else "true" end' <<<"$volume_row")
-    if [ "$has_source" = "true" ] && [ "$has_sources" = "true" ]; then
+    if [ "$source_state" = "set" ] && [ "$has_sources" = "true" ]; then
       die "invalid volume entry in feature $label, arg $volume_arg_name: use source or sources, not both"
     fi
 
@@ -120,10 +131,11 @@ while IFS= read -r feature; do
         [ "$source" != "__invalid__" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: sources is required"
         [ -n "$source" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: sources is required"
       done
-    else
-      source=$(jq -r 'if (.source != null and (.source | type) == "string") then .source else "" end' <<<"$volume_row")
-      [ -n "$source" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: source is required"
+    elif [ "$source_state" = "set" ]; then
+      source=$(jq -r '.source' <<<"$volume_row")
       source_list=("$source")
+    else
+      source_list=("$volume_path")
     fi
 
     volume_default=$(jq -r 'if .default == null then "true" elif ((.default | type) == "boolean") then (.default | tostring) else "__invalid__" end' <<<"$volume_row")
@@ -134,18 +146,13 @@ while IFS= read -r feature; do
       [ "$value" != "__invalid__" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: $key must be boolean"
     done
 
-    target_state=$(jq -r 'if .target == null then "null" elif ((.target | type) == "string") then "ok" else "__invalid__" end' <<<"$volume_row")
-    [ "$target_state" != "__invalid__" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: target must be string"
-    target=$(jq -r '.target // ""' <<<"$volume_row")
-
     if [ -n "${volume_arg_default[$volume_arg_name]:-}" ] && [ "${volume_arg_default[$volume_arg_name]}" != "$volume_default" ]; then
       die "invalid manifest: arg_name '$volume_arg_name' has mixed default values (${volume_arg_default[$volume_arg_name]} vs $volume_default)"
     fi
     volume_arg_default[$volume_arg_name]=$volume_default
 
     for source in "${source_list[@]}"; do
-      row_target=${target:-$source}
-      mount_rows+=("$source:$row_target")
+      mount_rows+=("$source:$volume_path")
     done
   done < <(jq -cr '(.volumes // []) | if type == "array" then .[] else empty end' <<<"$feature")
 

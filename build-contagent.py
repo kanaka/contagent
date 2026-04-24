@@ -88,7 +88,7 @@ def main() -> None:
     labels: list[str] = []
     parts: list[str] = []
     selected_feature_names: list[str] = []
-    volume_arg_safe: dict[str, bool] = {}
+    volume_arg_default: dict[str, bool] = {}
 
     print("Building image with selected features:")
     for f in features:
@@ -111,7 +111,11 @@ def main() -> None:
             if not arg_name:
                 die(f"invalid volume entry in feature {label}: arg_name is required")
 
-            has_source = volume.get("source") not in (None, "")
+            mount_path = volume.get("path")
+            if not isinstance(mount_path, str) or not mount_path:
+                die(f"invalid volume entry in feature {label}, arg {arg_name}: path is required")
+
+            has_source = volume.get("source") is not None
             has_sources = volume.get("sources") is not None
             if has_source and has_sources:
                 die(f"invalid volume entry in feature {label}, arg {arg_name}: use source or sources, not both")
@@ -123,9 +127,9 @@ def main() -> None:
                 sources = [str(s or "") for s in raw_sources]
                 if not sources or any(not s for s in sources):
                     die(f"invalid volume entry in feature {label}, arg {arg_name}: sources is required")
-            else:
-                source = str(volume.get("source") or "")
-                if not source:
+            elif has_source:
+                source = volume.get("source")
+                if not isinstance(source, str) or not source:
                     die(f"invalid volume entry in feature {label}, arg {arg_name}: source is required")
 
             raw_default = volume.get("default", True)
@@ -135,16 +139,13 @@ def main() -> None:
                 value = volume.get(key)
                 if value is not None and not isinstance(value, bool):
                     die(f"invalid volume entry in feature {label}, arg {arg_name}: {key} must be boolean")
-            target_value = volume.get("target")
-            if target_value is not None and not isinstance(target_value, str):
-                die(f"invalid volume entry in feature {label}, arg {arg_name}: target must be string")
 
-            if arg_name in volume_arg_safe and volume_arg_safe[arg_name] != raw_default:
+            if arg_name in volume_arg_default and volume_arg_default[arg_name] != raw_default:
                 die(
                     f"invalid manifest: arg_name '{arg_name}' has mixed default values "
-                    f"({str(volume_arg_safe[arg_name]).lower()} vs {str(raw_default).lower()})"
+                    f"({str(volume_arg_default[arg_name]).lower()} vs {str(raw_default).lower()})"
                 )
-            volume_arg_safe[arg_name] = raw_default
+            volume_arg_default[arg_name] = raw_default
 
         env_map = f.get("env")
         if env_map is not None and not isinstance(env_map, dict):
@@ -167,14 +168,16 @@ def main() -> None:
         if volumes:
             mount_rows: list[str] = []
             for v in volumes:
-                target = v.get("target") or ""
+                mount_path = str(v.get("path") or "")
                 if v.get("sources") is not None:
                     for src in v.get("sources") or []:
                         source = str(src or "")
-                        mount_rows.append(f"{source}:{(target or source)}")
-                else:
+                        mount_rows.append(f"{source}:{mount_path}")
+                elif v.get("source") is not None:
                     source = str(v.get("source") or "")
-                    mount_rows.append(f"{source}:{(target or source)}")
+                    mount_rows.append(f"{source}:{mount_path}")
+                else:
+                    mount_rows.append(f"{mount_path}:{mount_path}")
             mounts = ",".join(mount_rows)
         else:
             mounts = ",".join(f.get("mounts") or [])

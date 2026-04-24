@@ -88,26 +88,46 @@ def load_labels(image: str) -> tuple[dict, list[str]]:
 
 def volume_rows(feature_name: str, volume: dict) -> list[dict]:
     arg_name = str(volume.get("arg_name") or "")
-    use_sources = volume.get("sources") is not None
-    sources = volume.get("sources") if use_sources else [volume.get("source")]
-    target = str(volume.get("target") or "")
-    rows: list[dict] = []
+    if not arg_name:
+        die(f"invalid volume entry in feature {feature_name}: arg_name is required")
 
-    for raw_source in sources or []:
-        source = str(raw_source or "")
-        if not arg_name or not source:
-            continue
-        rows.append({
-            "feature": feature_name,
-            "arg_name": arg_name,
-            "source": source,
-            "target": target or source,
-            "safe": volume.get("default", True),
-            "file": volume.get("file", False),
-            "read_only": volume.get("read_only", False),
-            "create_if_missing": not use_sources,
-        })
-    return rows
+    mount_path = volume.get("path")
+    if not isinstance(mount_path, str) or not mount_path:
+        die(f"invalid volume entry in feature {feature_name}, arg {arg_name}: path is required")
+
+    has_source = volume.get("source") is not None
+    has_sources = volume.get("sources") is not None
+    if has_source and has_sources:
+        die(f"invalid volume entry in feature {feature_name}, arg {arg_name}: use source or sources, not both")
+
+    if has_sources:
+        raw_sources = volume.get("sources")
+        if not isinstance(raw_sources, list):
+            die(f"invalid volume entry in feature {feature_name}, arg {arg_name}: sources is required")
+        sources = [str(s or "") for s in raw_sources]
+        if not sources or any(not s for s in sources):
+            die(f"invalid volume entry in feature {feature_name}, arg {arg_name}: sources is required")
+        create_if_missing = False
+    elif has_source:
+        source = volume.get("source")
+        if not isinstance(source, str) or not source:
+            die(f"invalid volume entry in feature {feature_name}, arg {arg_name}: source is required")
+        sources = [source]
+        create_if_missing = True
+    else:
+        sources = [mount_path]
+        create_if_missing = True
+
+    return [{
+        "feature": feature_name,
+        "arg_name": arg_name,
+        "source": source,
+        "path": mount_path,
+        "safe": volume.get("default", True),
+        "file": volume.get("file", False),
+        "read_only": volume.get("read_only", False),
+        "create_if_missing": create_if_missing,
+    } for source in sources]
 
 
 def build_meta(manifest: dict, selected_features: list[str]) -> dict:
@@ -255,7 +275,7 @@ def main() -> None:
         if not enabled.get(row["arg_name"], False):
             continue
         src = resolve_path(row["source"], host_home, workdir)
-        dst = resolve_path(row["target"], host_home, workdir)
+        dst = resolve_path(row["path"], host_home, workdir)
         if dst not in target_candidates:
             target_candidates[dst] = []
             target_order.append(dst)

@@ -50,13 +50,48 @@ function loadImageMeta(image) {
 
 function volumeRows(featureName, volume) {
   const argName = String(volume.arg_name || "");
-  const useSources = volume.sources != null;
-  const sources = useSources ? volume.sources : [volume.source];
-  const target = String(volume.target || "");
-  return (sources || []).map((rawSource) => {
-    const source = String(rawSource || "");
-    return { feature: featureName, argName, source, target: target || source, safe: volume.default ?? true, file: volume.file ?? false, readOnly: volume.read_only ?? false, createIfMissing: !useSources };
-  }).filter((row) => row.argName && row.source);
+  if (!argName) die(`invalid volume entry in feature ${featureName}: arg_name is required`);
+
+  const mountPath = volume.path;
+  if (typeof mountPath !== "string" || !mountPath) {
+    die(`invalid volume entry in feature ${featureName}, arg ${argName}: path is required`);
+  }
+
+  const hasSource = volume.source != null;
+  const hasSources = volume.sources != null;
+  if (hasSource && hasSources) {
+    die(`invalid volume entry in feature ${featureName}, arg ${argName}: use source or sources, not both`);
+  }
+
+  let sources = [];
+  let createIfMissing = true;
+  if (hasSources) {
+    if (!Array.isArray(volume.sources)) {
+      die(`invalid volume entry in feature ${featureName}, arg ${argName}: sources is required`);
+    }
+    sources = volume.sources.map((v) => String(v || ""));
+    if (!sources.length || sources.some((v) => !v)) {
+      die(`invalid volume entry in feature ${featureName}, arg ${argName}: sources is required`);
+    }
+    createIfMissing = false;
+  } else if (hasSource) {
+    const source = String(volume.source || "");
+    if (!source) die(`invalid volume entry in feature ${featureName}, arg ${argName}: source is required`);
+    sources = [source];
+  } else {
+    sources = [mountPath];
+  }
+
+  return sources.map((source) => ({
+    feature: featureName,
+    argName,
+    source,
+    path: mountPath,
+    safe: volume.default ?? true,
+    file: volume.file ?? false,
+    readOnly: volume.read_only ?? false,
+    createIfMissing,
+  }));
 }
 
 
@@ -164,10 +199,10 @@ function planRuntime(model, parsed, host) {
   for (const row of model.includedRows) {
     if (!parsed.enabledByArg.get(row.argName)) continue;
     const source = resolvePath(row.source, host.home, host.cwd);
-    const target = resolvePath(row.target, host.home, host.cwd);
-    const list = byTarget.get(target) || [];
+    const mountPath = resolvePath(row.path, host.home, host.cwd);
+    const list = byTarget.get(mountPath) || [];
     list.push({ source, file: row.file, readOnly: row.readOnly, createIfMissing: row.createIfMissing });
-    byTarget.set(target, list);
+    byTarget.set(mountPath, list);
   }
   const seenGids = new Set();
   const extraGroupSpecs = [];

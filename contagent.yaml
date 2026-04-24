@@ -20,7 +20,7 @@ features:
       - arg_name: docker-socket
         default: false
         file: true
-        target: /var/run/docker.sock
+        path: /var/run/docker.sock
         sources:
           - ~/.docker/run/docker.sock
           - ~/.colima/default/docker.sock
@@ -58,8 +58,7 @@ features:
     aliases: [postgres, postgresql, all, all-tools]
     path: Dockerfile-parts/psql
     volumes:
-      - arg_name: psql
-        source: ~/.supabase
+      - { arg_name: psql, path: ~/.supabase }
     version:
       env: PSQL_VERSION
       default: latest
@@ -69,9 +68,9 @@ features:
     aliases: [clj, clojurescript, cljs, all, all-tools]
     path: Dockerfile-parts/clojure
     volumes:
-      - { arg_name: clojure, source: ~/.clojure }
-      - { arg_name: clojure, source: ~/.m2 }
-      - { arg_name: clojure, source: ~/.gitlibs }
+      - { arg_name: clojure, path: ~/.clojure }
+      - { arg_name: clojure, path: ~/.m2 }
+      - { arg_name: clojure, path: ~/.gitlibs }
     version:
       env: CLOJURE_VERSION
       default: latest
@@ -91,7 +90,7 @@ features:
     volumes:
       - arg_name: gh-config
         default: false
-        source: ~/.config/gh
+        path: ~/.config/gh
     version:
       env: GH_VERSION
       default: latest
@@ -101,9 +100,9 @@ features:
     aliases: [all, all-tools]
     path: Dockerfile-parts/mise
     volumes:
-      - { arg_name: mise, source: ~/.config/mise }
-      - { arg_name: mise, source: ~/.local/share/mise }
-      - { arg_name: mise, source: ~/.local/state/mise }
+      - { arg_name: mise, path: ~/.config/mise }
+      - { arg_name: mise, path: ~/.local/share/mise }
+      - { arg_name: mise, path: ~/.local/state/mise }
     version:
       env: MISE_VERSION
       default: latest
@@ -123,8 +122,7 @@ features:
     aliases: [claude-code, cc, claudecode, all, all-agents]
     path: Dockerfile-parts/claude-code
     volumes:
-      - arg_name: claude
-        source: ~/.claude
+      - { arg_name: claude, path: ~/.claude }
     version:
       env: CLAUDE_CODE_VERSION
       default: latest
@@ -134,9 +132,9 @@ features:
     aliases: [all, all-agents]
     path: Dockerfile-parts/opencode
     volumes:
-      - { arg_name: opencode, source: ~/.config/opencode }
-      - { arg_name: opencode, source: ~/.local/share/opencode }
-      - { arg_name: opencode, source: ~/.local/state/opencode }
+      - { arg_name: opencode, path: ~/.config/opencode }
+      - { arg_name: opencode, path: ~/.local/share/opencode }
+      - { arg_name: opencode, path: ~/.local/state/opencode }
     version:
       env: OPENCODE_VERSION
       default: latest
@@ -146,8 +144,7 @@ features:
     aliases: [pi-agent, all, all-agents]
     path: Dockerfile-parts/pi
     volumes:
-      - arg_name: pi
-        source: ~/.pi
+      - { arg_name: pi, path: ~/.pi }
     version:
       env: PI_VERSION
       default: latest
@@ -157,8 +154,7 @@ features:
     aliases: [all, all-agents]
     path: Dockerfile-parts/codex
     volumes:
-      - arg_name: codex
-        source: ~/.codex
+      - { arg_name: codex, path: ~/.codex }
     version:
       env: CODEX_VERSION
       default: latest
@@ -168,8 +164,7 @@ features:
     aliases: [github-copilot, githubcopilot, all, all-agents]
     path: Dockerfile-parts/copilot
     volumes:
-      - arg_name: copilot
-        source: ~/.copilot
+      - { arg_name: copilot, path: ~/.copilot }
     version:
       env: COPILOT_VERSION
       default: latest
@@ -182,6 +177,6 @@ features:
       default: latest
       resolve: ./voom-like-version.sh .
     volumes:
-      - { arg_name: contagent-state, source: ~/.contagent }
-      - { arg_name: contagent-state, source: ~/.local/state/contagent }
-      - { arg_name: contagent-state, source: ~/.cache/contagent, target: /var/cache/contagent }
+      - { arg_name: contagent-state, path: ~/.contagent }
+      - { arg_name: contagent-state, path: ~/.local/state/contagent }
+      - { arg_name: contagent-state, path: /var/cache/contagent, source: ~/.cache/contagent }
