@@ -1,154 +1,186 @@
 version: 2
 
 features:
-  - names: [base]
+  - name: base
     path: Dockerfile-parts/base
     required: true
 
-  - names: [build, build-tools, all, all-tools]
+  - name: build
+    aliases: [build-tools, all, all-tools]
     path: Dockerfile-parts/build
     version:
       env: BUILD_ESSENTIAL_VERSION
       default: latest
       resolve: curl -fsSL "https://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages.gz" | gzip -dc | awk '/^Package:[[:space:]]build-essential$/{f=1} f&&/^Version:[[:space:]]/{v=$2;f=0} END{print v}'
 
-  - names: [docker, all, all-tools]
+  - name: docker
+    aliases: [all, all-tools]
     path: Dockerfile-parts/docker
+    volumes:
+      - arg_name: docker-socket
+        default: false
+        file: true
+        target: /var/run/docker.sock
+        sources:
+          - ~/.docker/run/docker.sock
+          - ~/.colima/default/docker.sock
+          - /var/run/docker.sock
     version:
       env: DOCKER_VERSION
       default: latest
       resolve: arch=$(uname -m); case "$arch" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) arch=amd64 ;; esac; curl -fsSL "https://download.docker.com/linux/debian/dists/bookworm/stable/binary-${arch}/Packages" | awk '/^Package:[[:space:]]docker-ce-cli$/{p=1;next} p&&/^Version:[[:space:]]/{v=$2} p&&/^$/{p=0} END{print v}'
 
-  - names: [java, jdk, clojure, clj, clojurescript, cljs, all, all-tools]
+  - name: java
+    aliases: [jdk, clojure, clj, clojurescript, cljs, all, all-tools]
     path: Dockerfile-parts/java
     version:
       env: JAVA_VERSION
       default: latest
       resolve: curl -fsSL "https://api.adoptium.net/v3/info/available_releases" | jq -r '.most_recent_lts'
 
-  - names: [go, golang, all, all-tools]
+  - name: go
+    aliases: [golang, all, all-tools]
     path: Dockerfile-parts/go
     version:
       env: GO_VERSION
       default: latest
       resolve: curl -fsSL "https://go.dev/VERSION?m=text" | tr -d '\r' | sed -n '1{s/^go//;p;}'
 
-  - names: [rust, all, all-tools]
+  - name: rust
+    aliases: [all, all-tools]
     path: Dockerfile-parts/rust
     version:
       env: RUST_VERSION
       default: latest
       resolve: curl -fsSL "https://static.rust-lang.org/dist/channel-rust-stable.toml" | sed -n '/^\[pkg.rust\]$/,/^\[/{/^version = /{s/^version = "//; s/"$//; s/ .*//; p;};}'
 
-  - names: [psql, postgres, postgresql, all, all-tools]
+  - name: psql
+    aliases: [postgres, postgresql, all, all-tools]
     path: Dockerfile-parts/psql
-    mounts:
-      - "~/.supabase:~/.supabase"
+    volumes:
+      - arg_name: psql
+        source: ~/.supabase
     version:
       env: PSQL_VERSION
       default: latest
       resolve: curl -fsSL "https://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages.gz" | gzip -dc | awk '/^Package:[[:space:]]postgresql-client$/{f=1} f&&/^Version:[[:space:]]/{v=$2;f=0} END{print v}'
 
-  - names: [clojure, clj, clojurescript, cljs, all, all-tools]
+  - name: clojure
+    aliases: [clj, clojurescript, cljs, all, all-tools]
     path: Dockerfile-parts/clojure
-    mounts:
-      - "~/.clojure:~/.clojure"
-      - "~/.m2:~/.m2"
-      - "~/.gitlibs:~/.gitlibs"
+    volumes:
+      - { arg_name: clojure, source: ~/.clojure }
+      - { arg_name: clojure, source: ~/.m2 }
+      - { arg_name: clojure, source: ~/.gitlibs }
     version:
       env: CLOJURE_VERSION
       default: latest
       resolve: curl -fsSL "https://api.github.com/repos/clojure/brew-install/releases/latest" | jq -r '.tag_name'
 
-  - names: [clojurescript, cljs, all, all-tools]
+  - name: clojurescript
+    aliases: [cljs, all, all-tools]
     path: Dockerfile-parts/clojurescript
     version:
       env: CLOJURESCRIPT_VERSION
       default: latest
       resolve: curl -fsSL "https://repo1.maven.org/maven2/org/clojure/clojurescript/maven-metadata.xml" | awk 'match($0,/<release>[^<]+<\/release>/){v=substr($0,RSTART+9,RLENGTH-19)} END{if(v)print v; else exit 1}'
 
-  - names: [gh, github, github-cli, githubcli, all, all-tools]
+  - name: gh
+    aliases: [github, github-cli, githubcli, all, all-tools]
     path: Dockerfile-parts/gh
-    mounts:
-      - "~/.config/gh:~/.config/gh"
+    volumes:
+      - arg_name: gh-config
+        default: false
+        source: ~/.config/gh
     version:
       env: GH_VERSION
       default: latest
       resolve: curl -fsSL "https://api.github.com/repos/cli/cli/releases/latest" | jq -r '.tag_name | ltrimstr("v")'
 
-  - names: [mise, all, all-tools]
+  - name: mise
+    aliases: [all, all-tools]
     path: Dockerfile-parts/mise
-    mounts:
-      - "~/.config/mise:~/.config/mise"
-      - "~/.local/share/mise:~/.local/share/mise"
-      - "~/.local/state/mise:~/.local/state/mise"
+    volumes:
+      - { arg_name: mise, source: ~/.config/mise }
+      - { arg_name: mise, source: ~/.local/share/mise }
+      - { arg_name: mise, source: ~/.local/state/mise }
     version:
       env: MISE_VERSION
       default: latest
       resolve: curl -fsSL "https://api.github.com/repos/jdx/mise/releases/latest" | jq -r '.tag_name | ltrimstr("v")'
 
-  - names: [pnpm, all, all-tools]
+  - name: pnpm
+    aliases: [all, all-tools]
     path: Dockerfile-parts/pnpm
-    mounts:
-      - "~/.local/share/pnpm:~/.local/share/pnpm"
+    volumes:
+      - { arg_name: pnpm, source: ~/.local/share/pnpm }
     version:
       env: PNPM_VERSION
       default: latest
       resolve: curl -fsSL "https://registry.npmjs.org/pnpm/latest" | jq -r .version
 
-  - names: [claude, claude-code, cc, claudecode, all, all-agents]
+  - name: claude
+    aliases: [claude-code, cc, claudecode, all, all-agents]
     path: Dockerfile-parts/claude-code
-    mounts:
-      - "~/.claude:~/.claude"
+    volumes:
+      - arg_name: claude
+        source: ~/.claude
     version:
       env: CLAUDE_CODE_VERSION
       default: latest
       resolve: curl -fsSL "https://registry.npmjs.org/@anthropic-ai/claude-code/latest" | jq -r .version
 
-  - names: [opencode, all, all-agents]
+  - name: opencode
+    aliases: [all, all-agents]
     path: Dockerfile-parts/opencode
-    mounts:
-      - "~/.config/opencode:~/.config/opencode"
-      - "~/.local/share/opencode:~/.local/share/opencode"
-      - "~/.local/state/opencode:~/.local/state/opencode"
+    volumes:
+      - { arg_name: opencode, source: ~/.config/opencode }
+      - { arg_name: opencode, source: ~/.local/share/opencode }
+      - { arg_name: opencode, source: ~/.local/state/opencode }
     version:
       env: OPENCODE_VERSION
       default: latest
       resolve: curl -fsSL "https://registry.npmjs.org/opencode-ai/latest" | jq -r .version
 
-  - names: [pi, pi-agent, all, all-agents]
+  - name: pi
+    aliases: [pi-agent, all, all-agents]
     path: Dockerfile-parts/pi
-    mounts:
-      - "~/.pi:~/.pi"
+    volumes:
+      - arg_name: pi
+        source: ~/.pi
     version:
       env: PI_VERSION
       default: latest
       resolve: curl -fsSL "https://registry.npmjs.org/@mariozechner/pi-coding-agent/latest" | jq -r .version
 
-  - names: [codex, all, all-agents]
+  - name: codex
+    aliases: [all, all-agents]
     path: Dockerfile-parts/codex
-    mounts:
-      - "~/.codex:~/.codex"
+    volumes:
+      - arg_name: codex
+        source: ~/.codex
     version:
       env: CODEX_VERSION
       default: latest
       resolve: curl -fsSL "https://registry.npmjs.org/@openai/codex/latest" | jq -r .version
 
-  - names: [copilot, github-copilot, githubcopilot, all, all-agents]
+  - name: copilot
+    aliases: [github-copilot, githubcopilot, all, all-agents]
     path: Dockerfile-parts/copilot
-    mounts:
-      - "~/.copilot:~/.copilot"
+    volumes:
+      - arg_name: copilot
+        source: ~/.copilot
     version:
       env: COPILOT_VERSION
       default: latest
       resolve: curl -fsSL "https://registry.npmjs.org/@github/copilot/latest" | jq -r .version
 
-  - names: [runtime]
+  - name: runtime
     path: Dockerfile-parts/runtime
     required: true
     version:
       default: latest
       resolve: ./voom-like-version.sh .
-    mounts:
-      - "~/.local/state/contagent:~/.local/state/contagent"
-      - "~/.cache/contagent:/var/cache/contagent"
+    volumes:
+      - { arg_name: contagent-state, source: ~/.local/state/contagent }
+      - { arg_name: contagent-state, source: ~/.cache/contagent, target: /var/cache/contagent }

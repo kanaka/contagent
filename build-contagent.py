@@ -88,12 +88,15 @@ def main() -> None:
     labels: list[str] = []
     parts: list[str] = []
     selected_feature_names: list[str] = []
+    volume_arg_safe: dict[str, bool] = {}
 
     print("Building image with selected features:")
     for f in features:
-        names = f.get("names") or []
-        label, path = (names[0] if names else ""), (f.get("path") or "")
-        if not label or not path or not names:
+        label = str(f.get("name") or "")
+        aliases = [str(a) for a in (f.get("aliases") or [])]
+        names = [label, *aliases] if label else []
+        path = f.get("path") or ""
+        if not label or not path:
             die("invalid manifest row")
 
         for n in names:
@@ -102,6 +105,50 @@ def main() -> None:
             continue
 
         selected_feature_names.append(label)
+
+        for volume in f.get("volumes") or []:
+            arg_name = str(volume.get("arg_name") or "")
+            if not arg_name:
+                die(f"invalid volume entry in feature {label}: arg_name is required")
+
+            has_source = volume.get("source") not in (None, "")
+            has_sources = volume.get("sources") is not None
+            if has_source and has_sources:
+                die(f"invalid volume entry in feature {label}, arg {arg_name}: use source or sources, not both")
+
+            if has_sources:
+                raw_sources = volume.get("sources")
+                if not isinstance(raw_sources, list):
+                    die(f"invalid volume entry in feature {label}, arg {arg_name}: sources is required")
+                sources = [str(s or "") for s in raw_sources]
+                if not sources or any(not s for s in sources):
+                    die(f"invalid volume entry in feature {label}, arg {arg_name}: sources is required")
+            else:
+                source = str(volume.get("source") or "")
+                if not source:
+                    die(f"invalid volume entry in feature {label}, arg {arg_name}: source is required")
+
+            raw_default = volume.get("default", True)
+            if not isinstance(raw_default, bool):
+                die(f"invalid volume entry in feature {label}, arg {arg_name}: default must be boolean")
+            for key in ("file", "read_only"):
+                value = volume.get(key)
+                if value is not None and not isinstance(value, bool):
+                    die(f"invalid volume entry in feature {label}, arg {arg_name}: {key} must be boolean")
+            target_value = volume.get("target")
+            if target_value is not None and not isinstance(target_value, str):
+                die(f"invalid volume entry in feature {label}, arg {arg_name}: target must be string")
+
+            if arg_name in volume_arg_safe and volume_arg_safe[arg_name] != raw_default:
+                die(
+                    f"invalid manifest: arg_name '{arg_name}' has mixed default values "
+                    f"({str(volume_arg_safe[arg_name]).lower()} vs {str(raw_default).lower()})"
+                )
+            volume_arg_safe[arg_name] = raw_default
+
+        env_map = f.get("env")
+        if env_map is not None and not isinstance(env_map, dict):
+            die(f"invalid env entry in feature {label}: env must be a map")
 
         part = root / path
         if not part.exists():
@@ -116,7 +163,22 @@ def main() -> None:
         else:
             print(f"  {label}")
 
-        mounts = ",".join(f.get("mounts") or [])
+        volumes = f.get("volumes") or []
+        if volumes:
+            mount_rows: list[str] = []
+            for v in volumes:
+                target = v.get("target") or ""
+                if v.get("sources") is not None:
+                    for src in v.get("sources") or []:
+                        source = str(src or "")
+                        mount_rows.append(f"{source}:{(target or source)}")
+                else:
+                    source = str(v.get("source") or "")
+                    mount_rows.append(f"{source}:{(target or source)}")
+            mounts = ",".join(mount_rows)
+        else:
+            mounts = ",".join(f.get("mounts") or [])
+
         esc_value = escape_docker_label_value(str(value))
         esc_mounts = escape_docker_label_value(mounts)
         labels.append(f'io.contagent.component.{label}.version={esc_value}')

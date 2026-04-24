@@ -61,39 +61,110 @@ docker_args=()
 motd_lines=()
 component_labels=()
 selected_feature_names=()
+declare -A volume_arg_default=()
 
 echo "Building image with selected features:"
 while IFS= read -r feature; do
-  label=$(jq -r '.names[0] // ""' <<<"$feature")
-  path=$(jq -r '.path // ""' <<<"$feature")
-  required=$(jq -r '.required // false' <<<"$feature")
-  names_csv=$(jq -r '(.names // []) | join(",")' <<<"$feature")
-  env_name=$(jq -r '.version.env // ""' <<<"$feature")
-  default_value=$(jq -r '.version.default // ""' <<<"$feature")
-  resolve_cmd=$(jq -r '.version.resolve // ""' <<<"$feature")
-  mounts_csv=$(jq -r '(.mounts // []) | join(",")' <<<"$feature")
+  label=$(jq -r '.name // "" | tostring' <<<"$feature")
+  path=$(jq -r '.path // "" | tostring' <<<"$feature")
+  required=$(jq -r 'if .required == true then "true" else "false" end' <<<"$feature")
+  aliases_csv=$(jq -r '
+    if .aliases == null then ""
+    elif (.aliases | type) == "array" then (.aliases | map(tostring) | join(","))
+    else "__invalid__"
+    end
+  ' <<<"$feature")
 
-  [ -n "$label" ] && [ -n "$path" ] && [ -n "$names_csv" ] || die "invalid manifest row"
+  [ "$aliases_csv" != "__invalid__" ] || die "invalid manifest row"
+  [ -n "$label" ] && [ -n "$path" ] || die "invalid manifest row"
+
+  names_csv=$label
+  [ -n "$aliases_csv" ] && names_csv+=",$aliases_csv"
+
   select=0
-  [ "$required" = true ] && select=1
+  [ "$required" = "true" ] && select=1
 
   IFS=',' read -r -a names <<<"$names_csv"
   for token in "${names[@]}"; do
     [ -n "$token" ] || continue
-    if [ -n "${wanted[$token]:-}" ]; then
-      select=1
-      unset 'unknown[$token]'
-    fi
+    unset 'unknown[$token]'
+    [ -n "${wanted[$token]:-}" ] && select=1
   done
 
   [ "$select" -eq 1 ] || continue
   selected_feature_names+=("$label")
+
+  env_type=$(jq -r 'if .env == null then "null" else (.env | type) end' <<<"$feature")
+  [ "$env_type" = "null" ] || [ "$env_type" = "object" ] || die "invalid env entry in feature $label: env must be a map"
+
+  mount_rows=()
+  while IFS= read -r volume_row; do
+    [ -n "$volume_row" ] || continue
+
+    volume_arg_name=$(jq -r '.arg_name // "" | if type == "string" then . else "" end' <<<"$volume_row")
+    [ -n "$volume_arg_name" ] || die "invalid volume entry in feature $label: arg_name is required"
+
+    has_source=$(jq -r 'if (.source != null and (.source | type) == "string" and .source != "") then "true" else "false" end' <<<"$volume_row")
+    has_sources=$(jq -r 'if .sources == null then "false" else "true" end' <<<"$volume_row")
+    if [ "$has_source" = "true" ] && [ "$has_sources" = "true" ]; then
+      die "invalid volume entry in feature $label, arg $volume_arg_name: use source or sources, not both"
+    fi
+
+    if [ "$has_sources" = "true" ]; then
+      sources_type=$(jq -r '.sources | type' <<<"$volume_row")
+      [ "$sources_type" = "array" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: sources is required"
+
+      mapfile -t source_list < <(jq -r '.sources[]? | if type == "string" then . else "__invalid__" end' <<<"$volume_row")
+      [ "${#source_list[@]}" -gt 0 ] || die "invalid volume entry in feature $label, arg $volume_arg_name: sources is required"
+      for source in "${source_list[@]}"; do
+        [ "$source" != "__invalid__" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: sources is required"
+        [ -n "$source" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: sources is required"
+      done
+    else
+      source=$(jq -r 'if (.source != null and (.source | type) == "string") then .source else "" end' <<<"$volume_row")
+      [ -n "$source" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: source is required"
+      source_list=("$source")
+    fi
+
+    volume_default=$(jq -r 'if .default == null then "true" elif ((.default | type) == "boolean") then (.default | tostring) else "__invalid__" end' <<<"$volume_row")
+    [ "$volume_default" != "__invalid__" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: default must be boolean"
+
+    for key in file read_only; do
+      value=$(jq -r --arg key "$key" 'if .[$key] == null then "null" elif ((.[$key] | type) == "boolean") then (.[$key] | tostring) else "__invalid__" end' <<<"$volume_row")
+      [ "$value" != "__invalid__" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: $key must be boolean"
+    done
+
+    target_state=$(jq -r 'if .target == null then "null" elif ((.target | type) == "string") then "ok" else "__invalid__" end' <<<"$volume_row")
+    [ "$target_state" != "__invalid__" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: target must be string"
+    target=$(jq -r '.target // ""' <<<"$volume_row")
+
+    if [ -n "${volume_arg_default[$volume_arg_name]:-}" ] && [ "${volume_arg_default[$volume_arg_name]}" != "$volume_default" ]; then
+      die "invalid manifest: arg_name '$volume_arg_name' has mixed default values (${volume_arg_default[$volume_arg_name]} vs $volume_default)"
+    fi
+    volume_arg_default[$volume_arg_name]=$volume_default
+
+    for source in "${source_list[@]}"; do
+      row_target=${target:-$source}
+      mount_rows+=("$source:$row_target")
+    done
+  done < <(jq -cr '(.volumes // []) | if type == "array" then .[] else empty end' <<<"$feature")
+
+  if jq -e '(.volumes // []) | if type == "array" then (length > 0) else false end' >/dev/null <<<"$feature"; then
+    mounts_csv=$(IFS=,; printf '%s' "${mount_rows[*]}")
+  else
+    mounts_csv=$(jq -r '(.mounts // []) | if type == "array" then map(tostring) | join(",") else "" end' <<<"$feature")
+  fi
+
   [ -f "$script_dir/$path" ] || die "missing Dockerfile part: $path"
   [ -s "$dockerfile" ] && printf '\n' >> "$dockerfile"
   cat "$script_dir/$path" >> "$dockerfile"
 
   version_value=builtin
   if jq -e 'has("version")' >/dev/null <<<"$feature"; then
+    env_name=$(jq -r '.version.env // ""' <<<"$feature")
+    default_value=$(jq -r '.version.default // ""' <<<"$feature")
+    resolve_cmd=$(jq -r '.version.resolve // ""' <<<"$feature")
+
     version_value=${default_value:-latest}
     [ -n "$env_name" ] && version_value=${!env_name:-$version_value}
     if [ "$version_value" = latest ]; then
