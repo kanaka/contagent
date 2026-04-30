@@ -86,6 +86,15 @@ features:
       default: latest
       resolve: curl -fsSL "https://api.github.com/repos/jdx/mise/releases/latest" | jq -r '.tag_name | ltrimstr("v")'
 
+  - names: [pnpm, all, all-tools]
+    path: Dockerfile-parts/pnpm
+    mounts:
+      - "~/.local/share/pnpm:~/.local/share/pnpm"
+    version:
+      env: PNPM_VERSION
+      default: latest
+      resolve: curl -fsSL "https://registry.npmjs.org/pnpm/latest" | jq -r .version
+
   - names: [claude, claude-code, cc, claudecode, all, all-agents]
     path: Dockerfile-parts/claude-code
     mounts:
