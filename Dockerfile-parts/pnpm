@@ -1,0 +1,5 @@
+ARG PNPM_VERSION
+
+RUN npm install -g \
+    "pnpm@${PNPM_VERSION}" \
+    && npm cache clean --force
