@@ -81,6 +81,7 @@ features:
     mounts:
       - "~/.config/mise:~/.config/mise"
       - "~/.local/share/mise:~/.local/share/mise"
+      - "~/.local/state/mise:~/.local/state/mise"
     version:
       env: MISE_VERSION
       default: latest
