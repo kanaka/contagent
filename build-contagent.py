@@ -15,7 +15,7 @@ import yaml
 
 USAGE = """Usage: ./build-contagent.py [--<feature> ...]
 
-Features, aliases, order, snippets, and version rules come from contagent.yaml.
+Features, aliases, order, snippets, and version rules come from build-contagent.yaml.
 Default features come from CONTAGENT_FEATURES.
 """
 
@@ -70,7 +70,7 @@ def main() -> None:
     unknown = set(wanted)
 
     root = Path(__file__).resolve().parent
-    manifest_file = root / "contagent.yaml"
+    manifest_file = root / "build-contagent.yaml"
     dockerfile = root / ".Dockerfile.generated"
     motd_file = root / ".contagent-motd.generated"
 
@@ -88,8 +88,6 @@ def main() -> None:
     labels: list[str] = []
     parts: list[str] = []
     selected_feature_names: list[str] = []
-    volume_arg_default: dict[str, bool] = {}
-
     print("Building image with selected features:")
     for f in features:
         label = str(f.get("name") or "")
@@ -106,46 +104,27 @@ def main() -> None:
 
         selected_feature_names.append(label)
 
+        feature_volume_default: bool | None = None
         for volume in f.get("volumes") or []:
-            arg_name = str(volume.get("arg_name") or "")
-            if not arg_name:
-                die(f"invalid volume entry in feature {label}: arg_name is required")
-
             mount_path = volume.get("path")
             if not isinstance(mount_path, str) or not mount_path:
-                die(f"invalid volume entry in feature {label}, arg {arg_name}: path is required")
+                die(f"invalid volume entry in feature {label}: path is required")
 
-            has_source = volume.get("source") is not None
-            has_sources = volume.get("sources") is not None
-            if has_source and has_sources:
-                die(f"invalid volume entry in feature {label}, arg {arg_name}: use source or sources, not both")
-
-            if has_sources:
-                raw_sources = volume.get("sources")
-                if not isinstance(raw_sources, list):
-                    die(f"invalid volume entry in feature {label}, arg {arg_name}: sources is required")
-                sources = [str(s or "") for s in raw_sources]
-                if not sources or any(not s for s in sources):
-                    die(f"invalid volume entry in feature {label}, arg {arg_name}: sources is required")
-            elif has_source:
-                source = volume.get("source")
-                if not isinstance(source, str) or not source:
-                    die(f"invalid volume entry in feature {label}, arg {arg_name}: source is required")
+            source = volume.get("source")
+            if source is not None and (not isinstance(source, str) or not source):
+                die(f"invalid volume entry in feature {label}: source is required")
 
             raw_default = volume.get("default", True)
             if not isinstance(raw_default, bool):
-                die(f"invalid volume entry in feature {label}, arg {arg_name}: default must be boolean")
+                die(f"invalid volume entry in feature {label}: default must be boolean")
+            if feature_volume_default is not None and feature_volume_default != raw_default:
+                die(f"invalid manifest: feature '{label}' has mixed volume default values")
+            feature_volume_default = raw_default
+
             for key in ("file", "read_only"):
                 value = volume.get(key)
                 if value is not None and not isinstance(value, bool):
-                    die(f"invalid volume entry in feature {label}, arg {arg_name}: {key} must be boolean")
-
-            if arg_name in volume_arg_default and volume_arg_default[arg_name] != raw_default:
-                die(
-                    f"invalid manifest: arg_name '{arg_name}' has mixed default values "
-                    f"({str(volume_arg_default[arg_name]).lower()} vs {str(raw_default).lower()})"
-                )
-            volume_arg_default[arg_name] = raw_default
+                    die(f"invalid volume entry in feature {label}: {key} must be boolean")
 
         env_map = f.get("env")
         if env_map is not None and not isinstance(env_map, dict):
@@ -167,17 +146,14 @@ def main() -> None:
         volumes = f.get("volumes") or []
         if volumes:
             mount_rows: list[str] = []
+            seen_mount_rows: set[str] = set()
             for v in volumes:
                 mount_path = str(v.get("path") or "")
-                if v.get("sources") is not None:
-                    for src in v.get("sources") or []:
-                        source = str(src or "")
-                        mount_rows.append(f"{source}:{mount_path}")
-                elif v.get("source") is not None:
-                    source = str(v.get("source") or "")
-                    mount_rows.append(f"{source}:{mount_path}")
-                else:
-                    mount_rows.append(f"{mount_path}:{mount_path}")
+                source = str(v.get("source") or mount_path)
+                row = f"{source}:{mount_path}"
+                if row not in seen_mount_rows:
+                    mount_rows.append(row)
+                    seen_mount_rows.add(row)
             mounts = ",".join(mount_rows)
         else:
             mounts = ",".join(f.get("mounts") or [])

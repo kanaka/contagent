@@ -94,26 +94,24 @@ Build-time options:
   - `--all` (all tool + agent features)
 
 `CONTAGENT_FEATURES` sets the default enabled feature list; CLI flags add to it.
-Both accept any token listed in a feature's `names` array in `contagent.yaml`.
-Feature mounts are defined in each feature's `mounts` list and propagated into image labels at build time (`io.contagent.component.<name>.mounts`).
+Both accept a feature `name` or any token listed in a feature's `aliases` array in `build-contagent.yaml`.
+Feature mounts are defined in each feature's `volumes` list and propagated into image labels at build time (`io.contagent.component.<name>.mounts`).
 Feature versions are also labeled (`io.contagent.component.<name>.version`).
-The image also embeds `io.contagent.schema.version`, `io.contagent.manifest.json` (full `contagent.yaml` as JSON), and `io.contagent.manifest.features` (selected feature names as a JSON array).
+The image also embeds `io.contagent.schema.version`, `io.contagent.manifest.json` (full `build-contagent.yaml` as JSON), and `io.contagent.manifest.features` (selected feature names as a JSON array).
 
 Build implementation notes:
 
-- Build composition is driven by `contagent.yaml` and assembled from
+- Build composition is driven by `build-contagent.yaml` and assembled from
   `Dockerfile-parts/` into `.Dockerfile.generated` on each build (`base` is always included).
 - Manifest parsing uses local `yq` when available, otherwise `mikefarah/yq` via Docker.
 
 Runtime environment:
 
 - `CONTAGENT_IMAGE` (default: `contagent:latest`)
-- `CONTAGENT_DOCKER_SOCKET` (non-empty enables docker socket mount; empty disables)
-- `CONTAGENT_GH_CONFIG` (non-empty enables `~/.config/gh` mount when available; empty disables)
 - `CONTAGENT_EXTRA_GROUP_GIDS` (non-empty comma-separated gid list applies supplementary groups; empty disables)
 - CLI options:
-  - `--docker-socket` / `--no-docker-socket`
-  - `--gh-config` / `--no-gh-config`
+  - `--<feature>` / `--no-<feature>` enables or disables all volume mounts for an image feature
+  - `--show-options` lists image-defined feature volume toggles
   - `--extra-groups <gid[,gid]>` (appends to `CONTAGENT_EXTRA_GROUP_GIDS`)
 
 Examples:
@@ -125,11 +123,9 @@ CONTAGENT_FEATURES="pi codex" PI_VERSION=0.56.0 ./build-contagent.sh
 ./build-contagent.sh --claude --opencode --copilot
 CONTAGENT_IMAGE=contagent:20260302_101530-gabc123 ./contagent.sh
 
-CONTAGENT_DOCKER_SOCKET=1 ./contagent.sh docker ps
-./contagent.sh --docker-socket docker ps
+./contagent.sh --docker docker ps
 
-CONTAGENT_GH_CONFIG=1 ./contagent.sh gh auth status
-./contagent.sh --gh-config gh auth status
+./contagent.sh --gh gh auth status
 
 CONTAGENT_EXTRA_GROUP_GIDS=970 ./contagent.sh
 ./contagent.sh --extra-groups 970,971
@@ -142,16 +138,17 @@ Contagent reduces exposure; it is not a hard security sandbox.
 Mounted by default:
 
 - Current project directory (same absolute path).
-- Feature-specific mounts (except `gh` config mount)
-- Base feature mounts include:
+- Feature-specific mounts whose feature volume toggle defaults to on.
+- Runtime feature mounts include:
+  - `~/.contagent` -> `~/.contagent`
   - `~/.local/state/contagent` -> `~/.local/state/contagent`
   - `~/.cache/contagent` -> `/var/cache/contagent`
 - SSH agent socket when detected.
 
 Mounted only when enabled:
 
-- Docker socket (`CONTAGENT_DOCKER_SOCKET=1` or `--docker-socket`) when detected.
-- `~/.config/gh` (`CONTAGENT_GH_CONFIG=1` or `--gh-config`) when `gh` feature is present.
+- Docker socket (`--docker`) when the `docker` feature is present.
+- `~/.config/gh` (`--gh`) when the `gh` feature is present.
 
 Not mounted by default:
 

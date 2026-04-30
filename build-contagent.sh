@@ -7,7 +7,7 @@ usage() {
   cat <<'EOF'
 Usage: ./build-contagent.sh [--<feature> ...]
 
-Features, aliases, order, snippets, and version rules come from contagent.yaml.
+Features, aliases, order, snippets, and version rules come from build-contagent.yaml.
 Default features come from CONTAGENT_FEATURES.
 Uses local yq when available, otherwise falls back to mikefarah/yq:4 via docker.
 EOF
@@ -17,7 +17,7 @@ CONTAGENT_IMAGE_NAME=${CONTAGENT_IMAGE_NAME:-contagent}
 CONTAGENT_FEATURES=${CONTAGENT_FEATURES:-}
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-manifest_file="$script_dir/contagent.yaml"
+manifest_file="$script_dir/build-contagent.yaml"
 dockerfile="$script_dir/.Dockerfile.generated"
 motd_file="$script_dir/.contagent-motd.generated"
 
@@ -61,8 +61,6 @@ docker_args=()
 motd_lines=()
 component_labels=()
 selected_feature_names=()
-declare -A volume_arg_default=()
-
 echo "Building image with selected features:"
 while IFS= read -r feature; do
   label=$(jq -r '.name // "" | tostring' <<<"$feature")
@@ -98,14 +96,13 @@ while IFS= read -r feature; do
   [ "$env_type" = "null" ] || [ "$env_type" = "object" ] || die "invalid env entry in feature $label: env must be a map"
 
   mount_rows=()
+  declare -A seen_mount_rows=()
+  feature_volume_default=
   while IFS= read -r volume_row; do
     [ -n "$volume_row" ] || continue
 
-    volume_arg_name=$(jq -r '.arg_name // "" | if type == "string" then . else "" end' <<<"$volume_row")
-    [ -n "$volume_arg_name" ] || die "invalid volume entry in feature $label: arg_name is required"
-
     volume_path=$(jq -r 'if (.path != null and (.path | type) == "string") then .path else "" end' <<<"$volume_row")
-    [ -n "$volume_path" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: path is required"
+    [ -n "$volume_path" ] || die "invalid volume entry in feature $label: path is required"
 
     source_state=$(jq -r '
       if has("source") and .source != null then
@@ -114,46 +111,31 @@ while IFS= read -r feature; do
         "unset"
       end
     ' <<<"$volume_row")
-    [ "$source_state" != "__invalid__" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: source is required"
+    [ "$source_state" != "__invalid__" ] || die "invalid volume entry in feature $label: source is required"
 
-    has_sources=$(jq -r 'if .sources == null then "false" else "true" end' <<<"$volume_row")
-    if [ "$source_state" = "set" ] && [ "$has_sources" = "true" ]; then
-      die "invalid volume entry in feature $label, arg $volume_arg_name: use source or sources, not both"
-    fi
-
-    if [ "$has_sources" = "true" ]; then
-      sources_type=$(jq -r '.sources | type' <<<"$volume_row")
-      [ "$sources_type" = "array" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: sources is required"
-
-      mapfile -t source_list < <(jq -r '.sources[]? | if type == "string" then . else "__invalid__" end' <<<"$volume_row")
-      [ "${#source_list[@]}" -gt 0 ] || die "invalid volume entry in feature $label, arg $volume_arg_name: sources is required"
-      for source in "${source_list[@]}"; do
-        [ "$source" != "__invalid__" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: sources is required"
-        [ -n "$source" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: sources is required"
-      done
-    elif [ "$source_state" = "set" ]; then
+    if [ "$source_state" = "set" ]; then
       source=$(jq -r '.source' <<<"$volume_row")
-      source_list=("$source")
     else
-      source_list=("$volume_path")
+      source=$volume_path
     fi
 
     volume_default=$(jq -r 'if .default == null then "true" elif ((.default | type) == "boolean") then (.default | tostring) else "__invalid__" end' <<<"$volume_row")
-    [ "$volume_default" != "__invalid__" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: default must be boolean"
+    [ "$volume_default" != "__invalid__" ] || die "invalid volume entry in feature $label: default must be boolean"
+    if [ -n "$feature_volume_default" ] && [ "$feature_volume_default" != "$volume_default" ]; then
+      die "invalid manifest: feature '$label' has mixed volume default values"
+    fi
+    feature_volume_default=$volume_default
 
     for key in file read_only; do
       value=$(jq -r --arg key "$key" 'if .[$key] == null then "null" elif ((.[$key] | type) == "boolean") then (.[$key] | tostring) else "__invalid__" end' <<<"$volume_row")
-      [ "$value" != "__invalid__" ] || die "invalid volume entry in feature $label, arg $volume_arg_name: $key must be boolean"
+      [ "$value" != "__invalid__" ] || die "invalid volume entry in feature $label: $key must be boolean"
     done
 
-    if [ -n "${volume_arg_default[$volume_arg_name]:-}" ] && [ "${volume_arg_default[$volume_arg_name]}" != "$volume_default" ]; then
-      die "invalid manifest: arg_name '$volume_arg_name' has mixed default values (${volume_arg_default[$volume_arg_name]} vs $volume_default)"
+    mount_row="$source:$volume_path"
+    if [ -z "${seen_mount_rows[$mount_row]:-}" ]; then
+      mount_rows+=("$mount_row")
+      seen_mount_rows[$mount_row]=1
     fi
-    volume_arg_default[$volume_arg_name]=$volume_default
-
-    for source in "${source_list[@]}"; do
-      mount_rows+=("$source:$volume_path")
-    done
   done < <(jq -cr '(.volumes // []) | if type == "array" then .[] else empty end' <<<"$feature")
 
   if jq -e '(.volumes // []) | if type == "array" then (length > 0) else false end' >/dev/null <<<"$feature"; then

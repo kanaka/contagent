@@ -17,14 +17,7 @@ features:
     aliases: [all, all-tools]
     path: Dockerfile-parts/docker
     volumes:
-      - arg_name: docker-socket
-        default: false
-        file: true
-        path: /var/run/docker.sock
-        sources:
-          - ~/.docker/run/docker.sock
-          - ~/.colima/default/docker.sock
-          - /var/run/docker.sock
+      - { path: /var/run/docker.sock, default: false, file: true }
     version:
       env: DOCKER_VERSION
       default: latest
@@ -58,7 +51,7 @@ features:
     aliases: [postgres, postgresql, all, all-tools]
     path: Dockerfile-parts/psql
     volumes:
-      - { arg_name: psql, path: ~/.supabase }
+      - { path: ~/.supabase }
     version:
       env: PSQL_VERSION
       default: latest
@@ -68,9 +61,9 @@ features:
     aliases: [clj, clojurescript, cljs, all, all-tools]
     path: Dockerfile-parts/clojure
     volumes:
-      - { arg_name: clojure, path: ~/.clojure }
-      - { arg_name: clojure, path: ~/.m2 }
-      - { arg_name: clojure, path: ~/.gitlibs }
+      - { path: ~/.clojure }
+      - { path: ~/.m2 }
+      - { path: ~/.gitlibs }
     version:
       env: CLOJURE_VERSION
       default: latest
@@ -79,6 +72,10 @@ features:
   - name: clojurescript
     aliases: [cljs, all, all-tools]
     path: Dockerfile-parts/clojurescript
+    volumes:
+      - { path: ~/.clojure }
+      - { path: ~/.m2 }
+      - { path: ~/.gitlibs }
     version:
       env: CLOJURESCRIPT_VERSION
       default: latest
@@ -88,9 +85,7 @@ features:
     aliases: [github, github-cli, githubcli, all, all-tools]
     path: Dockerfile-parts/gh
     volumes:
-      - arg_name: gh-config
-        default: false
-        path: ~/.config/gh
+      - { path: ~/.config/gh, default: false }
     version:
       env: GH_VERSION
       default: latest
@@ -100,9 +95,9 @@ features:
     aliases: [all, all-tools]
     path: Dockerfile-parts/mise
     volumes:
-      - { arg_name: mise, path: ~/.config/mise }
-      - { arg_name: mise, path: ~/.local/share/mise }
-      - { arg_name: mise, path: ~/.local/state/mise }
+      - { path: ~/.config/mise }
+      - { path: ~/.local/share/mise }
+      - { path: ~/.local/state/mise }
     version:
       env: MISE_VERSION
       default: latest
@@ -112,7 +107,7 @@ features:
     aliases: [all, all-tools]
     path: Dockerfile-parts/pnpm
     volumes:
-      - { arg_name: pnpm, source: ~/.local/share/pnpm }
+      - { path: ~/.local/share/pnpm }
     version:
       env: PNPM_VERSION
       default: latest
@@ -122,7 +117,7 @@ features:
     aliases: [claude-code, cc, claudecode, all, all-agents]
     path: Dockerfile-parts/claude-code
     volumes:
-      - { arg_name: claude, path: ~/.claude }
+      - { path: ~/.claude }
     version:
       env: CLAUDE_CODE_VERSION
       default: latest
@@ -132,9 +127,9 @@ features:
     aliases: [all, all-agents]
     path: Dockerfile-parts/opencode
     volumes:
-      - { arg_name: opencode, path: ~/.config/opencode }
-      - { arg_name: opencode, path: ~/.local/share/opencode }
-      - { arg_name: opencode, path: ~/.local/state/opencode }
+      - { path: ~/.config/opencode }
+      - { path: ~/.local/share/opencode }
+      - { path: ~/.local/state/opencode }
     version:
       env: OPENCODE_VERSION
       default: latest
@@ -144,7 +139,7 @@ features:
     aliases: [pi-agent, all, all-agents]
     path: Dockerfile-parts/pi
     volumes:
-      - { arg_name: pi, path: ~/.pi }
+      - { path: ~/.pi }
     version:
       env: PI_VERSION
       default: latest
@@ -154,7 +149,7 @@ features:
     aliases: [all, all-agents]
     path: Dockerfile-parts/codex
     volumes:
-      - { arg_name: codex, path: ~/.codex }
+      - { path: ~/.codex }
     version:
       env: CODEX_VERSION
       default: latest
@@ -164,7 +159,7 @@ features:
     aliases: [github-copilot, githubcopilot, all, all-agents]
     path: Dockerfile-parts/copilot
     volumes:
-      - { arg_name: copilot, path: ~/.copilot }
+      - { path: ~/.copilot }
     version:
       env: COPILOT_VERSION
       default: latest
@@ -177,6 +172,6 @@ features:
       default: latest
       resolve: ./voom-like-version.sh .
     volumes:
-      - { arg_name: contagent-state, path: ~/.contagent }
-      - { arg_name: contagent-state, path: ~/.local/state/contagent }
-      - { arg_name: contagent-state, path: /var/cache/contagent, source: ~/.cache/contagent }
+      - { path: ~/.contagent }
+      - { path: ~/.local/state/contagent }
+      - { path: /var/cache/contagent, source: ~/.cache/contagent }

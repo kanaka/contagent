@@ -69,7 +69,7 @@ run_in_launcher() {
 
 
 run_in_launcher_with_docker_socket() {
-  CONTAGENT_IMAGE="$CONTAGENT_IMAGE" "$launcher" --docker-socket bash -lc "$1"
+  CONTAGENT_IMAGE="$CONTAGENT_IMAGE" "$launcher" --docker bash -lc "$1"
 }
 
 
@@ -166,7 +166,7 @@ test_show_options_dynamic() {
   local out
   out=$(run_launcher_image "$img_cli" --show-options)
   grep -F -- "--inc / --no-inc (default: on" <<<"$out" >/dev/null
-  grep -F -- "--offopt / --no-offopt (default: off" <<<"$out" >/dev/null
+  grep -F -- "--offfeat / --no-offfeat (default: off" <<<"$out" >/dev/null
   ! grep -F -- "--hidden / --no-hidden" <<<"$out" >/dev/null
 }
 
@@ -207,41 +207,29 @@ test_default_off_toggle_semantics() {
   HOME="$tmp" run_launcher_image "$img_cli" true >/dev/null 2>/dev/null
   [ ! -e "$tmp/.smoke-off" ]
 
-  HOME="$tmp" run_launcher_image "$img_cli" --offopt true >/dev/null 2>/dev/null
+  HOME="$tmp" run_launcher_image "$img_cli" --offfeat true >/dev/null 2>/dev/null
   [ -e "$tmp/.smoke-off" ]
 
   rm -rf "$tmp"
 }
 
 
-test_arg_override_semantics() {
+test_overlapping_volume_feature_semantics() {
   local tmp
-  local home
-  local work
-
   tmp=$(mktemp -d)
-  home="$tmp/home"
-  work="$tmp/work"
-  mkdir -p "$home" "$work"
 
-  HOME="$home" run_launcher_image_in_dir "$work" "$img_cli" --inc=. true >/dev/null 2>/dev/null
-  [ -e "$work/.smoke-inc" ]
-  [ ! -e "$home/.smoke-inc" ]
+  HOME="$tmp" run_launcher_image "$img_overlap" true >/dev/null 2>/dev/null
+  [ -d "$tmp/.smoke-shared" ]
 
-  HOME="$home" run_launcher_image "$img_cli" "--inc=~/.alt" true >/dev/null 2>/dev/null
-  [ -e "$home/.alt/.smoke-inc" ]
+  rm -rf "$tmp/.smoke-shared"
+  HOME="$tmp" run_launcher_image "$img_overlap" --no-alpha true >/dev/null 2>/dev/null
+  [ -d "$tmp/.smoke-shared" ]
+
+  rm -rf "$tmp/.smoke-shared"
+  HOME="$tmp" run_launcher_image "$img_overlap" --no-alpha --no-beta true >/dev/null 2>/dev/null
+  [ ! -e "$tmp/.smoke-shared" ]
 
   rm -rf "$tmp"
-}
-
-
-test_arg_override_requires_value() {
-  expect_fail_contains "requires a value" run_launcher_image "$img_cli" --inc= true
-}
-
-
-test_sources_requires_existing_semantics() {
-  expect_fail_contains "no existing source found for target /work/multi among 2 candidates" run_launcher_image "$img_sources_missing" true
 }
 
 
@@ -265,34 +253,32 @@ docker image inspect "$CONTAGENT_IMAGE" >/dev/null 2>&1 || {
 trap cleanup EXIT
 
 smoke_prefix="contagent-smoketest-${$}-$(date +%s)"
-missing_a="/tmp/contagent-smoke-missing-a-${$}"
-missing_b="/tmp/contagent-smoke-missing-b-${$}"
-
 manifest_cli=$(jq -cn '{
   version: 2,
   features: [
-    {name: "inc", volumes: [{arg_name: "inc", path: "~/.smoke-inc"}]},
-    {name: "offfeat", volumes: [{arg_name: "offopt", default: false, path: "~/.smoke-off"}]},
-    {name: "hidden", volumes: [{arg_name: "hidden", path: "~/.smoke-hidden"}]}
+    {name: "inc", volumes: [{path: "~/.smoke-inc"}]},
+    {name: "offfeat", volumes: [{default: false, path: "~/.smoke-off"}]},
+    {name: "hidden", volumes: [{path: "~/.smoke-hidden"}]}
   ]
 }')
 selected_cli='["inc","offfeat"]'
 
-manifest_sources_missing=$(jq -cn --arg a "$missing_a" --arg b "$missing_b" '{
+manifest_overlap=$(jq -cn '{
   version: 2,
   features: [
-    {name: "multi", volumes: [{arg_name: "multi", sources: [$a, $b], path: "/work/multi"}]}
+    {name: "alpha", volumes: [{path: "~/.smoke-shared"}]},
+    {name: "beta", volumes: [{path: "~/.smoke-shared"}]}
   ]
 }')
-selected_sources='["multi"]'
+selected_overlap='["alpha","beta"]'
 
 img_cli="$smoke_prefix-cli"
-img_sources_missing="$smoke_prefix-sources-missing"
+img_overlap="$smoke_prefix-overlap"
 img_missing_schema="$smoke_prefix-no-schema"
 img_unsupported_schema="$smoke_prefix-schema-3"
 
 build_labeled_image "$img_cli" ok "$manifest_cli" "$selected_cli"
-build_labeled_image "$img_sources_missing" ok "$manifest_sources_missing" "$selected_sources"
+build_labeled_image "$img_overlap" ok "$manifest_overlap" "$selected_overlap"
 build_labeled_image "$img_missing_schema" missing "$manifest_cli" "$selected_cli"
 build_labeled_image "$img_unsupported_schema" unsupported "$manifest_cli" "$selected_cli"
 
@@ -320,9 +306,7 @@ run_step "schema label missing error" test_schema_missing_rejected
 run_step "schema unsupported error" test_schema_unsupported_rejected
 run_step "source mount create-if-missing behavior" test_source_create_semantics
 run_step "default off toggle behavior" test_default_off_toggle_semantics
-run_step "arg override rewrites source roots" test_arg_override_semantics
-run_step "arg override requires non-empty value" test_arg_override_requires_value
-run_step "sources mount requires existing candidate" test_sources_requires_existing_semantics
+run_step "overlapping feature volumes coalesce" test_overlapping_volume_feature_semantics
 
 run_step "claude cli availability" run_in_launcher 'command -v claude >/dev/null && claude --version >/dev/null || true'
 run_step "opencode cli availability" run_in_launcher 'command -v opencode >/dev/null && opencode --version >/dev/null || true'
