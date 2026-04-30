@@ -25,7 +25,8 @@ keeping filesystem and credential exposure narrow and intentional.
 
 - Docker on host.
 - Bash 4+ for `contagent.sh` and `build-contagent.sh`.
-- `curl`, `jq`, and `gzip` on host for resolving `latest` feature versions and image-label mount metadata.
+- `curl`, `jq`, and `gzip` on host for resolving `latest` feature versions.
+- `yq` on host for runtime config parsing, or contagent falls back to `yq` from the image.
 
 ## Quick start
 
@@ -95,24 +96,26 @@ Build-time options:
 
 `CONTAGENT_FEATURES` sets the default enabled feature list; CLI flags add to it.
 Both accept a feature `name` or any token listed in a feature's `aliases` array in `build-contagent.yaml`.
-Feature mounts are defined in each feature's `volumes` list and propagated into image labels at build time (`io.contagent.component.<name>.mounts`).
-Feature versions are also labeled (`io.contagent.component.<name>.version`).
-The image also embeds `io.contagent.schema.version`, `io.contagent.manifest.json` (full `build-contagent.yaml` as JSON), and `io.contagent.manifest.features` (selected feature names as a JSON array).
+Feature mounts are defined in each feature's `volumes` list. Build embeds a default runtime config at `/usr/local/share/contagent/contagent.yaml`.
 
 Build implementation notes:
 
 - Build composition is driven by `build-contagent.yaml` and assembled from
   `Dockerfile-parts/` into `.Dockerfile.generated` on each build (`base` is always included).
 - Manifest parsing uses local `yq` when available, otherwise `mikefarah/yq` via Docker.
+- The generated image contains the default runtime config for the selected features.
 
 Runtime environment:
 
 - `CONTAGENT_IMAGE` (default: `contagent:latest`)
 - `CONTAGENT_EXTRA_GROUP_GIDS` (non-empty comma-separated gid list applies supplementary groups; empty disables)
 - CLI options:
-  - `--<feature>` / `--no-<feature>` enables or disables all volume mounts for an image feature
-  - `--show-options` lists image-defined feature volume toggles
+  - `-c, --config CONFIG` chooses the runtime config path (default: `.contagent.yaml`)
+  - `--<feature>` / `--no-<feature>` enables or disables all volume mounts for a feature for this run
+  - `--show-options` lists config-defined feature volume toggles
   - `--extra-groups <gid[,gid]>` (appends to `CONTAGENT_EXTRA_GROUP_GIDS`)
+
+On first run, contagent writes the embedded default config to the chosen config path. Existing configs are left in place. If the config was not generated from the current image, contagent warns and continues.
 
 Examples:
 

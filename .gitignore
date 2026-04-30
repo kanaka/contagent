@@ -5,6 +5,7 @@
 .pi
 .Dockerfile.generated
 .contagent-motd.generated
+.contagent-default.yaml.generated
 __pycache__/
 *.pyc
 tmp/

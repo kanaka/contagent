@@ -20,12 +20,17 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 manifest_file="$script_dir/build-contagent.yaml"
 dockerfile="$script_dir/.Dockerfile.generated"
 motd_file="$script_dir/.contagent-motd.generated"
+default_config_file="$script_dir/.contagent-default.yaml.generated"
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 need_cmd() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
+json_string() {
+  jq -Rn --arg s "$1" '$s|tojson' -r
+}
+
 escape_docker_label_value() {
   local value
-  value=$(jq -Rn --arg s "$1" '$s|tojson' -r)
+  value=$(json_string "$1")
   value=${value//$/\\$}
   printf '%s' "$value"
 }
@@ -60,7 +65,9 @@ done
 docker_args=()
 motd_lines=()
 component_labels=()
-selected_feature_names=()
+runtime_config_body=$(mktemp)
+trap 'rm -f "$runtime_config_body"' EXIT
+printf 'version: %s\n\nfeatures:\n' "$schema_version" > "$runtime_config_body"
 echo "Building image with selected features:"
 while IFS= read -r feature; do
   label=$(jq -r '.name // "" | tostring' <<<"$feature")
@@ -90,14 +97,34 @@ while IFS= read -r feature; do
   done
 
   [ "$select" -eq 1 ] || continue
-  selected_feature_names+=("$label")
-
   env_type=$(jq -r 'if .env == null then "null" else (.env | type) end' <<<"$feature")
   [ "$env_type" = "null" ] || [ "$env_type" = "object" ] || die "invalid env entry in feature $label: env must be a map"
 
+  volume_count=$(jq -r '(.volumes // []) | length' <<<"$feature")
+  env_count=$(jq -r '(.env // {}) | length' <<<"$feature")
+  if [ "$volume_count" -gt 0 ] || [ "$env_count" -gt 0 ]; then
+    printf '  - name: %s\n' "$(json_string "$label")" >> "$runtime_config_body"
+    [ "$required" = true ] && printf '    required: true\n' >> "$runtime_config_body"
+    if [ "$volume_count" -gt 0 ]; then
+      printf '    volumes:\n' >> "$runtime_config_body"
+      while IFS= read -r runtime_volume; do
+        enabled=$(jq -r --arg required "$required" 'if $required == "true" then "true" elif .default == null then "true" else (.default | tostring) end' <<<"$runtime_volume")
+        path_value=$(jq -r '.path // ""' <<<"$runtime_volume")
+        printf '      - { enabled: %s, path: %s' "$enabled" "$(json_string "$path_value")" >> "$runtime_config_body"
+        source_value=$(jq -r '.source // ""' <<<"$runtime_volume")
+        [ -n "$source_value" ] && printf ', source: %s' "$(json_string "$source_value")" >> "$runtime_config_body"
+        file_value=$(jq -r 'if has("file") then (.file | tostring) else "" end' <<<"$runtime_volume")
+        [ -n "$file_value" ] && printf ', file: %s' "$file_value" >> "$runtime_config_body"
+        ro_value=$(jq -r 'if has("read_only") then (.read_only | tostring) else "" end' <<<"$runtime_volume")
+        [ -n "$ro_value" ] && printf ', read_only: %s' "$ro_value" >> "$runtime_config_body"
+        printf ' }\n' >> "$runtime_config_body"
+      done < <(jq -c '.volumes // [] | .[]' <<<"$feature")
+    fi
+    [ "$env_count" -gt 0 ] && printf '    environment: %s\n' "$(jq -c '.env' <<<"$feature")" >> "$runtime_config_body"
+  fi
+
   mount_rows=()
   declare -A seen_mount_rows=()
-  feature_volume_default=
   while IFS= read -r volume_row; do
     [ -n "$volume_row" ] || continue
 
@@ -121,10 +148,6 @@ while IFS= read -r feature; do
 
     volume_default=$(jq -r 'if .default == null then "true" elif ((.default | type) == "boolean") then (.default | tostring) else "__invalid__" end' <<<"$volume_row")
     [ "$volume_default" != "__invalid__" ] || die "invalid volume entry in feature $label: default must be boolean"
-    if [ -n "$feature_volume_default" ] && [ "$feature_volume_default" != "$volume_default" ]; then
-      die "invalid manifest: feature '$label' has mixed volume default values"
-    fi
-    feature_volume_default=$volume_default
 
     for key in file read_only; do
       value=$(jq -r --arg key "$key" 'if .[$key] == null then "null" elif ((.[$key] | type) == "boolean") then (.[$key] | tostring) else "__invalid__" end' <<<"$volume_row")
@@ -176,15 +199,16 @@ done <<<"$feature_rows"
 
 [ "${#unknown[@]}" -eq 0 ] || die "unknown feature(s): $(printf '%s\n' "${!unknown[@]}" | sort -u | paste -sd',' -)"
 
-features_json=$(jq -cn '$ARGS.positional' --args "${selected_feature_names[@]}")
-esc_schema_version=$(escape_docker_label_value "$schema_version")
-esc_manifest_json=$(escape_docker_label_value "$manifest_json")
-esc_features_json=$(escape_docker_label_value "$features_json")
-component_labels+=("io.contagent.schema.version=$esc_schema_version")
-component_labels+=("io.contagent.manifest.json=$esc_manifest_json")
-component_labels+=("io.contagent.manifest.features=$esc_features_json")
+runtime_config_id=$(sha256sum "$runtime_config_body" | awk '{print $1}')
+{
+  printf 'version: %s\n\n' "$schema_version"
+  printf 'image-hash: %s\n\n' "$runtime_config_id"
+  sed '1,/^$/d' "$runtime_config_body"
+} > "$default_config_file"
 
 [ -s "$dockerfile" ] || die "no features selected"
+printf '\nRUN mkdir -p /usr/local/share/contagent\n' >> "$dockerfile"
+printf 'COPY .contagent-default.yaml.generated /usr/local/share/contagent/contagent.yaml\n' >> "$dockerfile"
 
 voom_version=$(REPO_ROOT_VOOM=1 "$script_dir/voom-like-version.sh")
 image_ref="${CONTAGENT_IMAGE_NAME}:${voom_version}"

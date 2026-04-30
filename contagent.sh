@@ -10,7 +10,7 @@ Usage: ./contagent.sh [options] [--] [command ...]
 Options:
   --<feature>                 Enable volume mounts for an image feature
   --no-<feature>              Disable volume mounts for an image feature
-  --show-options              Show image-defined --<feature>/--no-<feature> toggles and exit
+  --show-options              Show config-defined --<feature>/--no-<feature> toggles and exit
   --extra-groups <gid[,gid]>  Append supplementary group GIDs for this run
   -h, --help                  Show this help
 EOF
@@ -41,7 +41,7 @@ bool_value() {
 apply_feature_toggle() {
   local arg=$1 feature=$2 state=$3 flag
   if [ -n "${included_default[$feature]+x}" ]; then
-    enabled[$feature]=$state
+    [ "$state" -eq 1 ] && feature_override[$feature]=true || feature_override[$feature]=false
   elif [ -n "${known_volume_feature[$feature]+x}" ]; then
     [ "$state" -eq 1 ] && flag="--$feature" || flag="--no-$feature"
     die "option $flag is known but not included in image (feature(s): $feature)"
@@ -53,42 +53,80 @@ apply_feature_toggle() {
 print_options() {
   local image=$1 feature state
   if [ "${#option_order[@]}" -eq 0 ]; then
-    printf 'Image %s exposes no volume toggles.\n' "$image"
+    printf 'Config for %s exposes no volume toggles.\n' "$image"
     return
   fi
-  printf 'Image volume toggles for %s:\n' "$image"
+  printf 'Config volume toggles for %s:\n' "$image"
   for feature in "${option_order[@]}"; do
-    [ "${included_default[$feature]}" = true ] && state=on || state=off
+    [ -n "$feature" ] || continue
+    state=${included_default[$feature]}
+    [ "$state" = true ] && state=on
+    [ "$state" = false ] && state=off
     printf '  --%s / --no-%s (default: %s; features: %s)\n' "$feature" "$feature" "$state" "$feature"
   done
 }
 
 CONTAGENT_IMAGE=${CONTAGENT_IMAGE:-contagent:latest}
 CONTAGENT_EXTRA_GROUP_GIDS=${CONTAGENT_EXTRA_GROUP_GIDS:-}
+CONTAGENT_CONFIG=.contagent.yaml
 need_cmd docker
 need_cmd jq
 
-image_inspect=$(docker image inspect "$CONTAGENT_IMAGE" 2>/dev/null) || {
-  die "image ${CONTAGENT_IMAGE} is not available locally; build it first with ./build-contagent.py"
+argv=("$@")
+for ((scan = 0; scan < ${#argv[@]}; scan++)); do
+  case "${argv[$scan]}" in
+    --) break ;;
+    -c|--config)
+      [ $((scan + 1)) -lt "${#argv[@]}" ] || die "${argv[$scan]} requires a value"
+      CONTAGENT_CONFIG=${argv[$((scan + 1))]}
+      scan=$((scan + 1))
+      ;;
+    --config=*) CONTAGENT_CONFIG=${argv[$scan]#--config=} ;;
+    -*) ;;
+    *) break ;;
+  esac
+done
+
+embedded_config() {
+  docker run --rm --entrypoint cat "$CONTAGENT_IMAGE" \
+    /usr/local/share/contagent/contagent.yaml
 }
 
-schema_raw=$(jq -r '.[0].Config.Labels["io.contagent.schema.version"] // ""' <<<"$image_inspect")
-[ -n "$schema_raw" ] || die "image is missing io.contagent.schema.version label; rebuild with ./build-contagent.py"
-if ! jq -rn --arg v "$schema_raw" '$v | tonumber | select(. == floor and . == 2)' >/dev/null 2>&1; then
-  die "unsupported schema version: $schema_raw"
-fi
-manifest_json=$(jq -cr '.[0].Config.Labels["io.contagent.manifest.json"] // empty | fromjson' <<<"$image_inspect" 2>/dev/null) || die "invalid manifest in image labels"
-[ -n "$manifest_json" ] || die "image is missing io.contagent.manifest.json label; rebuild with ./build-contagent.py"
-selected_json=$(jq -cr '.[0].Config.Labels["io.contagent.manifest.features"] // "[]" | fromjson' <<<"$image_inspect" 2>/dev/null) || die "image label io.contagent.manifest.features is invalid"
+yq_json() {
+  local file=$1
+  if command -v yq >/dev/null 2>&1; then
+    yq -o=json '.' "$file" 2>/dev/null || yq '.' "$file"
+  else
+    warn "yq not found; falling back to yq from $CONTAGENT_IMAGE"
+    docker run --rm -i --entrypoint yq "$CONTAGENT_IMAGE" -o=json '.' - <"$file" 2>/dev/null \
+      || docker run --rm -i --entrypoint yq "$CONTAGENT_IMAGE" '.' - <"$file"
+  fi
+}
 
-declare -A selected=()
-while IFS= read -r feature; do
-  [ -n "$feature" ] && selected[$feature]=1
-done < <(jq -r '.[] | tostring' <<<"$selected_json")
+if [ ! -s "$CONTAGENT_CONFIG" ]; then
+  mkdir -p "$(dirname "$CONTAGENT_CONFIG")"
+  tmp_config=$(mktemp)
+  embedded_config >"$tmp_config" || die "failed to extract default contagent config"
+  [ -s "$tmp_config" ] || die "embedded default contagent config is empty"
+  mv "$tmp_config" "$CONTAGENT_CONFIG"
+fi
+config_dir=$(cd "$(dirname "$CONTAGENT_CONFIG")" && pwd)
+config_json=$(yq_json "$CONTAGENT_CONFIG") || die "failed to parse $CONTAGENT_CONFIG"
+
+tmp_embedded=$(mktemp)
+trap 'rm -f "$tmp_embedded"' EXIT
+if embedded_config >"$tmp_embedded" 2>/dev/null; then
+  embedded_json=$(yq_json "$tmp_embedded") || embedded_json=
+  config_id=$(jq -r '."image-hash" // ""' <<<"$config_json")
+  embedded_id=$(jq -r '."image-hash" // ""' <<<"$embedded_json")
+  if [ -n "$embedded_id" ] && [ "$config_id" != "$embedded_id" ]; then
+    warn "$CONTAGENT_CONFIG was not generated from $CONTAGENT_IMAGE"
+  fi
+fi
 
 declare -A known_volume_feature=()
 declare -A included_default=()
-declare -A enabled=()
+declare -A feature_override=()
 declare -a option_order=()
 declare -a env_rows=()
 declare -a volume_rows=()
@@ -98,13 +136,15 @@ while IFS= read -r feature_json; do
   [ -n "$feature" ] || continue
 
   mapfile -t volumes < <(jq -c '.volumes // [] | .[]' <<<"$feature_json")
-  [ "${#volumes[@]}" -gt 0 ] || continue
+  if [ "${#volumes[@]}" -eq 0 ]; then
+    while IFS=$'\t' read -r key value; do
+      [ -n "$key" ] && env_rows+=("$key"$'\t'"$value")
+    done < <(jq -r '.environment // {} | to_entries[] | [.key, (.value | tostring)] | @tsv' <<<"$feature_json")
+    continue
+  fi
   known_volume_feature[$feature]=1
-  [ -n "${selected[$feature]+x}" ] || continue
 
-  default=$(jq -r '.default' <<<"${volumes[0]}")
-  default=$(bool_value "$default" true "$feature" default)
-  included_default[$feature]=$default
+  feature_default=
   option_order+=("$feature")
 
   for volume in "${volumes[@]}"; do
@@ -112,27 +152,29 @@ while IFS= read -r feature_json; do
     [ -n "$target" ] || die "invalid volume entry in feature $feature: path is required"
     source=$(jq -r '.source' <<<"$volume")
     [[ -n "$source" && "$source" != null ]] || source=$target
+    volume_enabled=$(bool_value "$(jq -r '.enabled' <<<"$volume")" true "$feature" enabled)
+    if [ -z "$feature_default" ]; then
+      feature_default=$volume_enabled
+    elif [ "$feature_default" != "$volume_enabled" ]; then
+      feature_default=mixed
+    fi
     file_flag=$(bool_value "$(jq -r '.file' <<<"$volume")" false "$feature" file)
     read_only=$(bool_value "$(jq -r '.read_only' <<<"$volume")" false "$feature" read_only)
     create=false
     [[ "$source" == '~' || "$source" == '~/'* || "$source" != /* ]] && create=true
-    volume_rows+=("$feature"$'\t'"$source"$'\t'"$target"$'\t'"$file_flag"$'\t'"$read_only"$'\t'"$create")
+    volume_rows+=("$feature"$'\t'"$volume_enabled"$'\t'"$source"$'\t'"$target"$'\t'"$file_flag"$'\t'"$read_only"$'\t'"$create")
   done
+  included_default[$feature]=$feature_default
 
   while IFS=$'\t' read -r key value; do
     [ -n "$key" ] && env_rows+=("$key"$'\t'"$value")
-  done < <(jq -r '.env // {} | to_entries[] | [.key, (.value | tostring)] | @tsv' <<<"$feature_json")
-done < <(jq -c '.features // [] | .[]' <<<"$manifest_json")
+  done < <(jq -r '.environment // {} | to_entries[] | [.key, (.value | tostring)] | @tsv' <<<"$feature_json")
+done < <(jq -c '.features // [] | .[]' <<<"$config_json")
 
 mapfile -t option_order < <(printf '%s\n' "${option_order[@]}" | sort)
-for feature in "${option_order[@]}"; do
-  [ "${included_default[$feature]}" = true ] && enabled[$feature]=1 || enabled[$feature]=0
-done
-
 show_options=0
 help_requested=0
 extra_groups_csv=$CONTAGENT_EXTRA_GROUP_GIDS
-argv=("$@")
 i=0
 while [ "$i" -lt "${#argv[@]}" ]; do
   arg=${argv[$i]}
@@ -140,6 +182,11 @@ while [ "$i" -lt "${#argv[@]}" ]; do
     --) i=$((i + 1)); break ;;
     -h|--help) help_requested=1; break ;;
     --show-options) show_options=1; i=$((i + 1)) ;;
+    -c|--config)
+      [ $((i + 1)) -lt "${#argv[@]}" ] || die "$arg requires a value"
+      i=$((i + 2))
+      ;;
+    --config=*) i=$((i + 1)) ;;
     --extra-groups)
       [ $((i + 1)) -lt "${#argv[@]}" ] || die "--extra-groups requires a value"
       extra_groups_csv=$(append_csv "$extra_groups_csv" "${argv[$((i + 1))]}")
@@ -187,10 +234,12 @@ done
 declare -A candidates_by_target=()
 declare -a target_order=()
 for row in "${volume_rows[@]}"; do
-  IFS=$'\t' read -r feature source target file_flag read_only create <<<"$row"
-  [ "${enabled[$feature]:-0}" -eq 1 ] || continue
-  src=$(resolve_path "$source" "$host_home" "$workdir")
-  dst=$(resolve_path "$target" "$host_home" "$workdir")
+  IFS=$'\t' read -r feature volume_enabled source target file_flag read_only create <<<"$row"
+  enabled=$volume_enabled
+  [ -n "${feature_override[$feature]+x}" ] && enabled=${feature_override[$feature]}
+  [ "$enabled" = true ] || continue
+  src=$(resolve_path "$source" "$host_home" "$config_dir")
+  dst=$(resolve_path "$target" "$host_home" "$config_dir")
   candidate="$src"$'\t'"$read_only"$'\t'"$file_flag"$'\t'"$create"
   if [ -z "${candidates_by_target[$dst]+x}" ]; then
     candidates_by_target[$dst]=$candidate

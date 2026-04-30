@@ -4,6 +4,7 @@
 # ///
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -73,6 +74,7 @@ def main() -> None:
     manifest_file = root / "build-contagent.yaml"
     dockerfile = root / ".Dockerfile.generated"
     motd_file = root / ".contagent-motd.generated"
+    default_config_file = root / ".contagent-default.yaml.generated"
 
     if not manifest_file.exists():
         die(f"missing manifest: {manifest_file}")
@@ -81,13 +83,12 @@ def main() -> None:
     if not features:
         die("manifest has no features")
     schema_version = manifest.get("version", 2)
-    manifest_json = json.dumps(manifest, separators=(",", ":"))
 
     docker_args: list[str] = []
     motd: list[str] = []
     labels: list[str] = []
     parts: list[str] = []
-    selected_feature_names: list[str] = []
+    runtime_features: list[dict] = []
     print("Building image with selected features:")
     for f in features:
         label = str(f.get("name") or "")
@@ -102,9 +103,10 @@ def main() -> None:
         if not (f.get("required", False) or any(n in wanted for n in names)):
             continue
 
-        selected_feature_names.append(label)
+        runtime_feature: dict = {"name": label}
+        if f.get("required", False):
+            runtime_feature["required"] = True
 
-        feature_volume_default: bool | None = None
         for volume in f.get("volumes") or []:
             mount_path = volume.get("path")
             if not isinstance(mount_path, str) or not mount_path:
@@ -117,18 +119,29 @@ def main() -> None:
             raw_default = volume.get("default", True)
             if not isinstance(raw_default, bool):
                 die(f"invalid volume entry in feature {label}: default must be boolean")
-            if feature_volume_default is not None and feature_volume_default != raw_default:
-                die(f"invalid manifest: feature '{label}' has mixed volume default values")
-            feature_volume_default = raw_default
-
             for key in ("file", "read_only"):
                 value = volume.get(key)
                 if value is not None and not isinstance(value, bool):
                     die(f"invalid volume entry in feature {label}: {key} must be boolean")
 
+        volumes = f.get("volumes") or []
+        if volumes:
+            runtime_volumes: list[dict] = []
+            for volume in volumes:
+                runtime_volume = {"enabled": True if f.get("required", False) else volume.get("default", True)}
+                for key in ("path", "source", "file", "read_only"):
+                    if key in volume:
+                        runtime_volume[key] = volume[key]
+                runtime_volumes.append(runtime_volume)
+            runtime_feature["volumes"] = runtime_volumes
+
         env_map = f.get("env")
         if env_map is not None and not isinstance(env_map, dict):
             die(f"invalid env entry in feature {label}: env must be a map")
+        if env_map:
+            runtime_feature["environment"] = env_map
+        if "volumes" in runtime_feature or "environment" in runtime_feature:
+            runtime_features.append(runtime_feature)
 
         part = root / path
         if not part.exists():
@@ -168,13 +181,23 @@ def main() -> None:
     if not parts:
         die("no features selected")
 
-    features_json = json.dumps(selected_feature_names, separators=(",", ":"))
+    runtime_config = {"version": schema_version, "features": runtime_features}
+    runtime_config_id = hashlib.sha256(
+        yaml.safe_dump(runtime_config, sort_keys=False).encode()
+    ).hexdigest()
+    runtime_config = {
+        "version": schema_version,
+        "image-hash": runtime_config_id,
+        "features": runtime_features,
+    }
+    default_config_file.write_text(yaml.safe_dump(runtime_config, sort_keys=False))
 
-    labels.append(f'io.contagent.schema.version={escape_docker_label_value(str(schema_version))}')
-    labels.append(f'io.contagent.manifest.json={escape_docker_label_value(manifest_json)}')
-    labels.append(f'io.contagent.manifest.features={escape_docker_label_value(features_json)}')
-
-    dockerfile.write_text("\n".join(parts) + ("\nLABEL " + " ".join(labels) + "\n" if labels else ""))
+    dockerfile.write_text(
+        "\n".join(parts)
+        + "\nRUN mkdir -p /usr/local/share/contagent\n"
+        + "COPY .contagent-default.yaml.generated /usr/local/share/contagent/contagent.yaml\n"
+        + ("LABEL " + " ".join(labels) + "\n" if labels else "")
+    )
     motd_file.write_text("contagent tool versions:\n" + "\n".join(f"  - {x}" for x in motd) + ("\n" if motd else ""))
 
     voom_env = dict(env)
