@@ -48,6 +48,15 @@ need_cmd() {
 }
 
 
+sha256_text() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | awk '{print $1}'
+  else
+    shasum -a 256 | awk '{print $1}'
+  fi
+}
+
+
 run_step() {
   local name=$1
   shift
@@ -130,7 +139,7 @@ build_config_image() {
   local config_id
 
   tmp=$(mktemp -d)
-  config_id=$(printf '%s' "$config_json" | sha256sum | awk '{print $1}')
+  config_id=$(printf '%s' "$config_json" | sha256_text)
   printf '%s' "$config_json" | jq --arg id "$config_id" \
     '. + {"image-hash": $id}' >"$tmp/contagent.yaml"
 

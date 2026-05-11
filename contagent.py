@@ -233,7 +233,7 @@ def parse_args(argv: list[str], model: dict) -> tuple[list[str], bool, bool, str
     return [], show_options, help_requested, extra_groups, overrides
 
 
-def mount_specs(rows: list[dict], overrides: dict, home: str, base: str) -> list[str]:
+def mount_plan(rows: list[dict], overrides: dict, home: str, base: str) -> tuple[list[str], list[str]]:
     by_target: dict[str, list[dict]] = {}
     order: list[str] = []
     for row in rows:
@@ -250,6 +250,7 @@ def mount_specs(rows: list[dict], overrides: dict, home: str, base: str) -> list
             by_target[dst].append(candidate)
 
     specs: list[str] = []
+    gids: list[str] = []
     for dst in order:
         candidates = by_target[dst]
         chosen = next((c for c in candidates if os.path.exists(c["source"])), None)
@@ -262,8 +263,15 @@ def mount_specs(rows: list[dict], overrides: dict, home: str, base: str) -> list
                 Path(chosen["source"]).touch(exist_ok=True)
             else:
                 os.makedirs(chosen["source"], exist_ok=True)
+        try:
+            st = os.stat(chosen["source"])
+            gid = str(st.st_gid)
+            if stat.S_ISSOCK(st.st_mode) and gid not in gids:
+                gids.append(gid)
+        except OSError:
+            pass
         specs.append(f"{chosen['source']}:{dst}" + (":ro" if chosen["read_only"] else ""))
-    return specs
+    return specs, gids
 
 
 def extra_group_specs(csv: str) -> str:
@@ -311,13 +319,15 @@ def main() -> None:
     env.update(dict(model["env"]))
     for key, value in env.items():
         args += ["--env", f"{key}={value}"]
-    for spec in mount_specs(model["rows"], overrides, home, str(config_base)):
+    specs, socket_gids = mount_plan(model["rows"], overrides, home, str(config_base))
+    for spec in specs:
         args += ["--volume", spec]
     ssh_sock = os.environ.get("SSH_AUTH_SOCK", "")
     if ssh_sock and is_socket(ssh_sock):
         args += ["--volume", f"{ssh_sock}:{ssh_sock}", "--env", f"SSH_AUTH_SOCK={ssh_sock}"]
     else:
         warn("SSH agent not available; SSH auth forwarding disabled")
+    groups = ",".join([groups, *socket_gids]) if groups else ",".join(socket_gids)
     group_specs = extra_group_specs(groups)
     if group_specs:
         args += ["--env", f"CONTAGENT_EXTRA_GROUP_SPECS={group_specs}"]

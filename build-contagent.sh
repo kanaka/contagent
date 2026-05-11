@@ -24,6 +24,13 @@ default_config_file="$script_dir/.contagent-default.yaml.generated"
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 need_cmd() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
 json_string() {
   jq -Rn --arg s "$1" '$s|tojson' -r
 }
@@ -199,7 +206,7 @@ done <<<"$feature_rows"
 
 [ "${#unknown[@]}" -eq 0 ] || die "unknown feature(s): $(printf '%s\n' "${!unknown[@]}" | sort -u | paste -sd',' -)"
 
-runtime_config_id=$(sha256sum "$runtime_config_body" | awk '{print $1}')
+runtime_config_id=$(sha256_file "$runtime_config_body")
 {
   printf 'version: %s\n\n' "$schema_version"
   printf 'image-hash: %s\n\n' "$runtime_config_id"

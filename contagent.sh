@@ -19,6 +19,7 @@ EOF
 warn() { printf 'WARN: %s\n' "$*" >&2; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 need_cmd() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
+stat_gid() { stat -c %g "$1" 2>/dev/null || stat -f %g "$1" 2>/dev/null; }
 
 resolve_path() {
   local raw=$1 home=$2 cwd=$3
@@ -272,6 +273,10 @@ for dst in "${target_order[@]}"; do
   fi
   [ -n "$chosen" ] || die "no existing source found for target $dst among ${#candidates[@]} candidates"
   IFS=$'\t' read -r src read_only _file _create <<<"$chosen"
+  if [ -S "$src" ]; then
+    socket_gid=$(stat_gid "$src" || true)
+    [ -n "$socket_gid" ] && extra_groups_csv=$(append_csv "$extra_groups_csv" "$socket_gid")
+  fi
   mount_spec="$src:$dst"
   [ "$read_only" = true ] && mount_spec+=:ro
   docker_args+=(--volume "$mount_spec")

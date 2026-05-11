@@ -183,7 +183,7 @@ function parseArgs(argv, model) {
   return { command, show, help, extraGroups, overrides };
 }
 
-function mountSpecs(rows, overrides, home, base) {
+function mountPlan(rows, overrides, home, base) {
   const byTarget = new Map();
   for (const row of rows) {
     const enabled = overrides.has(row.feature) ? overrides.get(row.feature) : row.enabled;
@@ -197,6 +197,7 @@ function mountSpecs(rows, overrides, home, base) {
   }
 
   const specs = [];
+  const gids = [];
   for (const [target, candidates] of byTarget.entries()) {
     let chosen = candidates.find((c) => fs.existsSync(c.source));
     if (!chosen) {
@@ -209,9 +210,14 @@ function mountSpecs(rows, overrides, home, base) {
         fs.mkdirSync(chosen.source, { recursive: true });
       }
     }
+    try {
+      const st = fs.statSync(chosen.source);
+      const gid = String(st.gid);
+      if (st.isSocket() && !gids.includes(gid)) gids.push(gid);
+    } catch { /* ignore */ }
     specs.push(`${chosen.source}:${target}${chosen.readOnly ? ":ro" : ""}`);
   }
-  return specs;
+  return { specs, gids };
 }
 
 function extraGroupSpecs(csv) {
@@ -252,11 +258,13 @@ function main() {
     ...model.env,
   ];
   for (const [key, value] of env) if (key) args.push("--env", `${key}=${value}`);
-  for (const spec of mountSpecs(model.rows, parsed.overrides, home, base)) args.push("--volume", spec);
+  const mounts = mountPlan(model.rows, parsed.overrides, home, base);
+  for (const spec of mounts.specs) args.push("--volume", spec);
   const sshSock = process.env.SSH_AUTH_SOCK || "";
   if (sshSock && isSocket(sshSock)) args.push("--volume", `${sshSock}:${sshSock}`, "--env", `SSH_AUTH_SOCK=${sshSock}`);
   else warn("SSH agent not available; SSH auth forwarding disabled");
-  const groups = extraGroupSpecs(parsed.extraGroups);
+  const groupCsv = [parsed.extraGroups, ...mounts.gids].filter(Boolean).join(",");
+  const groups = extraGroupSpecs(groupCsv);
   if (groups) args.push("--env", `CONTAGENT_EXTRA_GROUP_SPECS=${groups}`);
 
   const run = cp.spawnSync("docker", [...args, image, ...parsed.command], { stdio: "inherit" });
