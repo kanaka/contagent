@@ -87,9 +87,7 @@ usermod -g "$CONTAGENT_GID" -d "$CONTAGENT_HOME" -s /bin/bash \
 # usermod -aG root "$CONTAGENT_USERNAME" >/dev/null 2>&1 || true
 add_extra_groups
 
-docker_host=${DOCKER_HOST:-}
-sock=${docker_host#unix://}
-[ -n "$docker_host" ] && [ "$sock" != "$docker_host" ] && [ -S "$sock" ] && chmod 666 "$sock" >/dev/null 2>&1 || true
+[ -S /var/run/docker.sock ] && chmod 666 /var/run/docker.sock >/dev/null 2>&1 || true
 
 # Best-effort home dir fixup
 mkdir -p "$CONTAGENT_HOME"
