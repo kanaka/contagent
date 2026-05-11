@@ -104,8 +104,6 @@ def main() -> None:
             continue
 
         runtime_feature: dict = {"name": label}
-        if f.get("required", False):
-            runtime_feature["required"] = True
 
         for volume in f.get("volumes") or []:
             mount_path = volume.get("path")

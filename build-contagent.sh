@@ -111,7 +111,6 @@ while IFS= read -r feature; do
   env_count=$(jq -r '(.env // {}) | length' <<<"$feature")
   if [ "$volume_count" -gt 0 ] || [ "$env_count" -gt 0 ]; then
     printf '  - name: %s\n' "$(json_string "$label")" >> "$runtime_config_body"
-    [ "$required" = true ] && printf '    required: true\n' >> "$runtime_config_body"
     if [ "$volume_count" -gt 0 ]; then
       printf '    volumes:\n' >> "$runtime_config_body"
       while IFS= read -r runtime_volume; do
