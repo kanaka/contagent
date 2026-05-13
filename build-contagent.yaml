@@ -91,6 +91,16 @@ features:
       default: latest
       resolve: curl -fsSL "https://api.github.com/repos/cli/cli/releases/latest" | jq -r '.tag_name | ltrimstr("v")'
 
+  - name: aws
+    aliases: [aws-cli, awscli, amazon, amazon-web-services, all, all-tools]
+    path: Dockerfile-parts/aws
+    volumes:
+      - { path: ~/.aws, default: false }
+    version:
+      env: AWS_CLI_VERSION
+      default: latest
+      resolve: curl -fsSL "https://raw.githubusercontent.com/aws/aws-cli/v2/CHANGELOG.rst" | awk 'v == "" && /^[0-9]+\.[0-9]+\.[0-9]+$/ { v = $0 } END { if (v != "") print v; else exit 1 }'
+
   - name: mise
     aliases: [all, all-tools]
     path: Dockerfile-parts/mise

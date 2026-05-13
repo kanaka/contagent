@@ -77,6 +77,7 @@ Build-time options:
   - `--build` (alias: `--build-tools`) + `BUILD_ESSENTIAL_VERSION`
   - `--docker` + `DOCKER_VERSION`
   - `--gh` (aliases: `--github`, `--github-cli`, `--githubcli`) + `GH_VERSION`
+  - `--aws` (aliases: `--aws-cli`, `--awscli`, `--amazon`, `--amazon-web-services`) + `AWS_CLI_VERSION`
   - `--mise` + `MISE_VERSION`
   - `--psql` (aliases: `--postgres`, `--postgresql`) + `PSQL_VERSION`
   - `--go` (alias: `--golang`) + `GO_VERSION`
@@ -130,6 +131,8 @@ CONTAGENT_IMAGE=contagent:20260302_101530-gabc123 ./contagent.sh
 
 ./contagent.sh --gh gh auth status
 
+./contagent.sh --aws aws sts get-caller-identity
+
 CONTAGENT_EXTRA_GROUP_GIDS=970 ./contagent.sh
 ./contagent.sh --extra-groups 970,971
 ```
@@ -152,6 +155,7 @@ Mounted only when enabled:
 
 - Docker socket (`--docker`) when the `docker` feature is present.
 - `~/.config/gh` (`--gh`) when the `gh` feature is present.
+- `~/.aws` (`--aws`) when the `aws` feature is present.
 
 Not mounted by default:
 
@@ -162,6 +166,7 @@ Important implications:
 
 - Docker socket access is powerful and can affect the host.
 - `~/.config/gh` may contain high-privilege GitHub credentials/tokens.
+- `~/.aws` may contain high-privilege AWS credentials, profiles, and SSO cache data.
 - SSH agent forwarding allows use of loaded keys via the socket.
 - Run contagent only for projects and sessions where this trust model fits.
 

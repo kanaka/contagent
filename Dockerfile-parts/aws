@@ -1,0 +1,23 @@
+ARG AWS_CLI_VERSION=latest
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends groff \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    arch="$(uname -m)"; \
+    case "$arch" in \
+      x86_64) aws_arch=x86_64 ;; \
+      aarch64|arm64) aws_arch=aarch64 ;; \
+      *) echo "unsupported architecture for AWS CLI: $arch" >&2; exit 1 ;; \
+    esac; \
+    tmpdir="$(mktemp -d)"; \
+    if [ "$AWS_CLI_VERSION" = latest ]; then \
+      aws_url="https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}.zip"; \
+    else \
+      aws_url="https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}-${AWS_CLI_VERSION}.zip"; \
+    fi; \
+    curl -fsSL "$aws_url" -o "$tmpdir/awscliv2.zip"; \
+    unzip -q "$tmpdir/awscliv2.zip" -d "$tmpdir"; \
+    "$tmpdir/aws/install" --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli; \
+    rm -rf "$tmpdir"
