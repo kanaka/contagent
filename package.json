@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "description": "Host-side dependencies for contagent hostbridge",
+  "dependencies": {
+    "ws": "^8.18.0",
+    "glimpseui": "^0.8.0"
+  }
+}

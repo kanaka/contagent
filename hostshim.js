@@ -2,37 +2,38 @@
 /*
  * hostshim.js
  *
- * Runs inside the container. Symlink this to the Linux tool names the host
- * should service:
+ * Runs inside the container. Symlinked to Linux tool names the host should
+ * service (paplay, aplay, pbcopy, glimpse, etc.).
  *
- *   for t in paplay aplay play notify-send xdg-open pbcopy wl-copy xclip xsel say; do
- *     ln -s hostshim.js /usr/local/bin/$t
- *   done
+ * When invoked, it connects to the host bridge via WebSocket, sends the
+ * command and args, then bridges stdin/stdout/stderr and signals over the
+ * connection for the lifetime of the command.
  *
- * When invoked, it reads argv[0] (the tool name), forwards argv + stdin to
- * the host bridge over HTTP, then replays the result's stdout/stderr/exitCode.
- * The shim has no knowledge of which commands are valid — the server enforces
- * the opt-in list.
+ * See hostbridge.md for the full protocol specification.
  *
- * Job control: SIGINT/SIGTERM on the shim sends POST /cancel/:id to the
- * server using the X-Job-Id returned in the response headers. If the signal
- * lands before the job ID is known, the open socket is destroyed and the
- * server's socket-close backstop will terminate the job.
- *
- * No external dependencies. Node 18+.
+ * No external dependencies. Node 22+ (uses built-in WebSocket API).
  */
 
-const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
 const HOST = process.env.HOSTBRIDGE_HOST || 'host.docker.internal';
 const PORT_FILE = process.env.HOSTBRIDGE_PORT_FILE || '.contagent-hostbridge-port';
-const REQUEST_TIMEOUT_MS = 65_000;
+const CONNECT_TIMEOUT_MS = 10_000;
+const DEBUG = process.env.HOSTBRIDGE_DEBUG === '1';
+
+const cmd = path.basename(process.argv[1]);
+const args = process.argv.slice(2);
+
+function dbg(...a) {
+  if (DEBUG) console.error(`[hostshim:${cmd}:dbg]`, ...a);
+}
+
+// ---------- port resolution ----------
 
 function getPort() {
-  const src = process.env.HOSTBRIDGE_PORT || '';
-  if (src) return parseInt(src, 10);
+  const envPort = process.env.HOSTBRIDGE_PORT;
+  if (envPort) return parseInt(envPort, 10);
   try {
     return parseInt(fs.readFileSync(PORT_FILE, 'utf8').trim(), 10);
   } catch (err) {
@@ -40,145 +41,131 @@ function getPort() {
     process.exit(1);
   }
 }
-const CANCEL_TIMEOUT_MS = 2_000;
 
-const cmd = path.basename(process.argv[1]);
-const args = process.argv.slice(2);
-const DEBUG = process.env.HOSTBRIDGE_DEBUG === '1';
+// ---------- connect ----------
 
-function dbg(...a) {
-  if (DEBUG) console.error(`[hostshim:${cmd}:dbg]`, ...a);
-}
+const port = getPort();
+const url = `ws://${HOST}:${port}/`;
+dbg('connecting to', url);
 
-let mainReq = null;
-let jobId = null;
-let cancelling = false;
+const ws = new WebSocket(url);
 
-function exitForSignal(sig) {
-  // POSIX convention: 128 + signal number
-  process.exit(128 + (sig === 'SIGINT' ? 2 : 15));
-}
+const connectTimer = setTimeout(() => {
+  process.stderr.write(`${cmd}: hostbridge: connection timeout\n`);
+  try { ws.close(); } catch {}
+  process.exit(1);
+}, CONNECT_TIMEOUT_MS);
 
-function cancel(signal) {
-  dbg('cancel() called signal=', signal, 'cancelling=', cancelling, 'jobId=', jobId);
-  if (cancelling) return;
-  cancelling = true;
+// ---------- connection open ----------
 
-  if (!jobId) {
-    // Race: signal landed before we got the job ID. Drop the socket; the
-    // server will see the disconnect and kill the child via its backstop.
-    dbg('no jobId yet, destroying main request socket');
-    try { mainReq && mainReq.destroy(); } catch {}
-    exitForSignal(signal);
+ws.addEventListener('open', () => {
+  clearTimeout(connectTimer);
+  dbg('connected, sending exec');
+  ws.send(JSON.stringify({ type: 'exec', cmd, args }));
+});
+
+// ---------- message handling ----------
+
+ws.addEventListener('message', (event) => {
+  let msg;
+  try { msg = JSON.parse(event.data); } catch { return; }
+  dbg('received:', msg.type);
+
+  switch (msg.type) {
+    case 'started':
+      dbg('process started, setting up stdin');
+      setupStdin();
+      break;
+
+    case 'stdout':
+      if (msg.data) {
+        try { process.stdout.write(Buffer.from(msg.data, 'base64')); } catch {}
+      }
+      break;
+
+    case 'stderr':
+      if (msg.data) {
+        try { process.stderr.write(Buffer.from(msg.data, 'base64')); } catch {}
+      }
+      break;
+
+    case 'exit':
+      dbg('exit code:', msg.code);
+      process.exitCode = msg.code ?? 1;
+      try { ws.close(); } catch {}
+      break;
+
+    case 'error':
+      process.stderr.write(`${cmd}: hostbridge: ${msg.message}\n`);
+      process.exitCode = 1;
+      try { ws.close(); } catch {}
+      break;
+  }
+});
+
+// ---------- stdin forwarding ----------
+
+function setupStdin() {
+  if (process.stdin.isTTY) {
+    // No stdin to forward — but don't send stdin-end.
+    // The server will close the child's stdin when the connection closes.
+    // Sending stdin-end here would prematurely kill commands like glimpse
+    // that stay alive as long as stdin is open.
     return;
   }
 
-  dbg('sending POST /cancel/' + jobId + ' with signal', signal);
-  const creq = http.request({
-    method: 'POST',
-    host: HOST,
-    port: getPort(),
-    path: `/cancel/${jobId}`,
-    headers: { 'X-Signal': signal, 'Content-Length': 0 },
-    timeout: CANCEL_TIMEOUT_MS,
-  }, (cres) => {
-    dbg('cancel response status=', cres.statusCode);
-    cres.on('data', () => {});
-    cres.on('end', () => {
-      dbg('cancel response complete, exiting');
-      exitForSignal(signal);
-    });
+  process.stdin.on('data', (chunk) => {
+    sendMsg({ type: 'stdin', data: chunk.toString('base64') });
   });
-  creq.on('error',   (e) => { dbg('cancel request error:', e.message); exitForSignal(signal); });
-  creq.on('timeout', () => { dbg('cancel request timeout'); creq.destroy(); exitForSignal(signal); });
-  creq.end();
+
+  process.stdin.on('end', () => {
+    sendMsg({ type: 'stdin-end' });
+  });
+
+  process.stdin.on('close', () => {
+    sendMsg({ type: 'stdin-end' });
+  });
+
+  process.stdin.on('error', () => {
+    sendMsg({ type: 'stdin-end' });
+  });
+
+  process.stdin.resume();
 }
 
-process.on('SIGINT',  () => { dbg('SIGINT received'); cancel('SIGINT'); });
-process.on('SIGTERM', () => { dbg('SIGTERM received'); cancel('SIGTERM'); });
-
-function readStdin() {
-  return new Promise((resolve, reject) => {
-    if (process.stdin.isTTY) { resolve(null); return; }
-    const chunks = [];
-    let hasData = false;
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      resolve(chunks.length ? Buffer.concat(chunks) : null);
-    };
-    process.stdin.on('data', c => { hasData = true; chunks.push(c); });
-    process.stdin.on('end', finish);
-    process.stdin.on('close', finish);
-    process.stdin.on('error', () => finish());
-    process.stdin.resume();
-    // If stdin is an open pipe with no data (e.g. spawned via execFile),
-    // resolve on the next tick rather than hanging forever.
-    setTimeout(() => { if (!hasData) finish(); }, 0);
-  });
+function sendMsg(msg) {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(msg));
+  }
 }
 
-async function main() {
-  let stdinBuf = null;
-  try { stdinBuf = await readStdin(); }
-  catch { /* fall through, send null stdin */ }
-  dbg('stdin bytes=', stdinBuf ? stdinBuf.length : 0);
+// ---------- signal forwarding ----------
 
-  const body = JSON.stringify({
-    cmd,
-    args,
-    stdin: stdinBuf ? stdinBuf.toString('base64') : null,
-  });
-
-  const port = getPort();
-  dbg('POST http://' + HOST + ':' + port + '/exec cmd=', cmd, 'args=', args);
-  mainReq = http.request({
-    method: 'POST',
-    host: HOST,
-    port: port,
-    path: '/exec',
-    headers: {
-      'Content-Type': 'application/json',
-      'Content-Length': Buffer.byteLength(body),
-    },
-    timeout: REQUEST_TIMEOUT_MS,
-  }, (res) => {
-    jobId = res.headers['x-job-id'] || null;
-    dbg('response headers received status=', res.statusCode, 'jobId=', jobId);
-    let buf = '';
-    res.setEncoding('utf8');
-    res.on('data', c => buf += c);
-    res.on('end', () => {
-      dbg('response body complete bytes=', buf.length, 'cancelling=', cancelling);
-      if (cancelling) return; // cancel handler will call process.exit
-      try {
-        const r = JSON.parse(buf);
-        if (r.stdout) process.stdout.write(r.stdout);
-        if (r.stderr) process.stderr.write(r.stderr);
-        process.exit(typeof r.exitCode === 'number' ? r.exitCode : 1);
-      } catch {
-        process.stderr.write(`${cmd}: hostbridge: malformed response\n`);
-        process.exit(1);
-      }
-    });
-  });
-
-  mainReq.on('error', err => {
-    dbg('main request error:', err.message, 'cancelling=', cancelling);
-    if (cancelling) return;
-    process.stderr.write(`${cmd}: hostbridge: ${err.message}\n`);
-    process.exit(1);
-  });
-  mainReq.on('timeout', () => {
-    mainReq.destroy();
-    if (cancelling) return;
-    process.stderr.write(`${cmd}: hostbridge: timeout\n`);
-    process.exit(1);
-  });
-
-  mainReq.write(body);
-  mainReq.end();
+function forwardSignal(signal) {
+  dbg('forwarding signal:', signal);
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'signal', signal }));
+  } else {
+    // Not connected yet — just exit
+    process.exit(128 + (signal === 'SIGINT' ? 2 : 15));
+  }
 }
 
-main();
+process.on('SIGINT',  () => forwardSignal('SIGINT'));
+process.on('SIGTERM', () => forwardSignal('SIGTERM'));
+
+// ---------- connection lifecycle ----------
+
+ws.addEventListener('error', () => {
+  clearTimeout(connectTimer);
+  process.stderr.write(`${cmd}: hostbridge: connection error\n`);
+  process.exitCode = 1;
+});
+
+ws.addEventListener('close', () => {
+  dbg('connection closed, exitCode=', process.exitCode);
+  if (process.exitCode == null) process.exitCode = 1;
+  try { process.stdin.destroy(); } catch {}
+  // Safety net: force exit after allowing output to flush
+  setTimeout(() => process.exit(process.exitCode), 50).unref();
+});
