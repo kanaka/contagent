@@ -1,0 +1,6 @@
+
+COPY hostshim.js /usr/local/bin/hostshim.js
+RUN chmod +x /usr/local/bin/hostshim.js && \
+    for t in paplay aplay play notify-send xdg-open pbcopy; do \
+      ln -s hostshim.js /usr/local/bin/$t; \
+    done
