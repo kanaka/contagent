@@ -3,9 +3,14 @@
 .config
 .local
 .pi
-.Dockerfile.generated
-.contagent-motd.generated
-.contagent-default.yaml.generated
 __pycache__/
 *.pyc
 tmp/
+node_modules/
+.Dockerfile.generated
+.contagent-motd.generated
+.contagent-default.yaml.generated
+.contagent.yaml*
+.hostbridge-port
+.hostbridge-log
+.hostbridge-state.yaml
