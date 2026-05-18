@@ -153,6 +153,14 @@ function createLogger(logFile) {
 
 // ---------- access control ----------
 
+function yamlHint(cmd, args) {
+  const argsYaml = args.length
+    ? JSON.stringify(args) + '  # or use "any" for any args'
+    : 'any';
+  return `To allow permanently, add to hostbridge.rules in your config:\n` +
+    `  - cmd: ${cmd}\n    access: allow\n    args: ${argsYaml}\n    scope: always`;
+}
+
 function getAccessLevel(cmd, rawArgs, configFile, stateFile) {
   // Config rules (allow/deny = immediate)
   const cfgMatch = findMatchingRule(readYamlRules(configFile, 'hostbridge'), cmd, rawArgs);
@@ -289,7 +297,7 @@ function start(opts = {}) {
         if (level === 'prompt') {
           if (!glimpseBin) {
             log(`[hostbridge] deny ${cmd}: no UI for prompt`);
-            return reject(`${cmd}: denied (no UI available for approval)`);
+            return reject(`${cmd}: denied (no UI available for approval)\n${yamlHint(cmd, rawArgs)}`);
           }
           pending = true;
           const preview = [cmd, ...rawArgs].join(' ');
@@ -300,7 +308,10 @@ function start(opts = {}) {
           pending = false;
           if (ws.readyState !== 1) return;
 
-          if (!result) { log(`[hostbridge] ${cmd}: cancelled`); return reject(`${cmd}: denied by user`); }
+          if (!result) {
+            log(`[hostbridge] ${cmd}: cancelled`);
+            return reject(`${cmd}: denied by user\n${yamlHint(cmd, rawArgs)}`);
+          }
 
           const { action, scope, args: argsChoice } = result;
           if (scope !== 'once') {
