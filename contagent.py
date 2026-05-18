@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 
+import atexit
 import json
 import os
 import re
+import signal
 import shutil
 import stat
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 USAGE = """Usage: ./contagent.py [options] [--] [command ...]
@@ -331,7 +334,47 @@ def main() -> None:
     group_specs = extra_group_specs(groups)
     if group_specs:
         args += ["--env", f"CONTAGENT_EXTRA_GROUP_SPECS={group_specs}"]
-    os.execvp("docker", ["docker", *args, image, *command])
+    # Start hostbridge in the background
+    script_dir = Path(__file__).resolve().parent
+    hostbridge_proc = subprocess.Popen(
+        [str(script_dir / "hostbridge.js"), "--log-file", ".hostbridge-log"],
+    )
+
+    def cleanup_hostbridge():
+        if hostbridge_proc.poll() is None:
+            hostbridge_proc.terminate()
+            try:
+                hostbridge_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                hostbridge_proc.kill()
+
+    atexit.register(cleanup_hostbridge)
+
+    # Wait for port file
+    port_file = os.environ.get("HOSTBRIDGE_PORT_FILE", ".hostbridge-port")
+    for _ in range(50):
+        if Path(port_file).exists() and Path(port_file).stat().st_size > 0:
+            break
+        time.sleep(0.1)
+    else:
+        cleanup_hostbridge()
+        die("hostbridge failed to start")
+
+    hostbridge_port = Path(port_file).read_text().strip()
+    args += ["--env", f"HOSTBRIDGE_PORT={hostbridge_port}"]
+
+    # Forward signals to docker child
+    docker_proc = subprocess.Popen(["docker", *args, image, *command])
+
+    def forward_signal(signum, _frame):
+        docker_proc.send_signal(signum)
+
+    signal.signal(signal.SIGINT, forward_signal)
+    signal.signal(signal.SIGTERM, forward_signal)
+
+    exit_code = docker_proc.wait()
+    cleanup_hostbridge()
+    raise SystemExit(exit_code)
 
 
 if __name__ == "__main__":

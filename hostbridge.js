@@ -10,6 +10,9 @@
  * as WebSocket messages, signals are forwarded via messages, and closing the
  * connection kills the process.
  *
+ * Can be used as a library: require('./hostbridge.js').start({ logFile, portFile })
+ * Or run directly: ./hostbridge.js [--log-file path] [--port-file path]
+ *
  * See hostbridge.md for the full protocol specification.
  *
  * Dependencies: ws, glimpseui (optional)
@@ -30,15 +33,11 @@ try {
 }
 
 const HOST = '127.0.0.1';
-const PORT_FILE = process.env.HOSTBRIDGE_PORT_FILE || '.hostbridge-port';
+const DEFAULT_PORT_FILE = '.hostbridge-port';
 const DEFAULT_TIMEOUT_MS = 60_000;
 const SHUTDOWN_GRACE_MS = 2_000;
 const PLATFORM = process.platform;
 const DEBUG = process.env.HOSTBRIDGE_DEBUG === '1';
-
-function dbg(...args) {
-  if (DEBUG) console.error('[hostbridge:dbg]', ...args);
-}
 
 // ---------- argument validators / transformers ----------
 
@@ -151,7 +150,7 @@ function which(exec) {
   return r.status === 0 && r.stdout.trim() ? r.stdout.trim() : null;
 }
 
-function resolveRegistry() {
+function resolveRegistry(log) {
   const resolved = {};
   for (const [name, entry] of Object.entries(REGISTRY)) {
     const cands = (entry.candidates && entry.candidates[PLATFORM]) || [];
@@ -165,9 +164,9 @@ function resolveRegistry() {
         exec: picked.resolvedPath,
         transform: picked.transform,
       };
-      console.log(`[hostbridge] ${name.padEnd(12)} -> ${picked.resolvedPath}`);
+      log(`[hostbridge] ${name.padEnd(12)} -> ${picked.resolvedPath}`);
     } else {
-      console.log(`[hostbridge] ${name.padEnd(12)} -> (no implementation on ${PLATFORM})`);
+      log(`[hostbridge] ${name.padEnd(12)} -> (no implementation on ${PLATFORM})`);
     }
   }
   for (const [alias, target] of Object.entries(ALIASES)) {
@@ -176,200 +175,274 @@ function resolveRegistry() {
   return resolved;
 }
 
-const COMMANDS = resolveRegistry();
-
-// ---------- glimpse resolution ----------
-
 function resolveGlimpseBinary() {
-  // First: check glimpseui npm package
   try {
     const mainEntry = require.resolve('glimpseui');
     const candidate = path.join(path.dirname(mainEntry), 'glimpse');
     if (fs.existsSync(candidate)) return candidate;
   } catch {}
-  // Fallback: search PATH
   return which('glimpse');
 }
 
-const glimpseBinary = resolveGlimpseBinary();
-if (glimpseBinary) {
-  COMMANDS.glimpse = {
-    exec: glimpseBinary,
-    transform: passthrough,
-    timeout: 0, // no timeout — lifetime controlled by user
-  };
-  console.log(`[hostbridge] ${'glimpse'.padEnd(12)} -> ${glimpseBinary}`);
-} else {
-  console.log(`[hostbridge] ${'glimpse'.padEnd(12)} -> (not found; npm install glimpseui)`);
+// ---------- logging ----------
+
+function createLogger(logFile) {
+  let stream = null;
+  let startup = true;
+
+  if (logFile) {
+    stream = fs.createWriteStream(logFile, { flags: 'w' });
+  }
+
+  function log(msg) {
+    // Always write to log file if configured
+    if (stream) stream.write(msg + '\n');
+    // During startup: always write to stderr (visible in terminal)
+    // After startup: only write to stderr if no log file (fallback)
+    if (startup || !stream) {
+      process.stderr.write(msg + '\n');
+    }
+  }
+
+  function dbg(...args) {
+    if (!DEBUG) return;
+    log('[hostbridge:dbg] ' + args.join(' '));
+  }
+
+  function endStartup() {
+    if (stream) {
+      log(`[hostbridge] logging to ${logFile}`);
+    }
+    startup = false;
+  }
+
+  function close() {
+    if (stream) { try { stream.end(); } catch {} }
+  }
+
+  return { log, dbg, endStartup, close };
 }
 
 // ---------- process management ----------
-
-const children = new Set();
 
 function killGroup(child, signal) {
   try { process.kill(-child.pid, signal); } catch {}
 }
 
-// ---------- WebSocket server ----------
+// ---------- start / stop API ----------
 
-const httpServer = http.createServer((_req, res) => {
-  res.writeHead(426, { 'Content-Type': 'text/plain' });
-  res.end('WebSocket connection required\n');
-});
+/**
+ * Start the hostbridge server.
+ * @param {object} [opts]
+ * @param {string} [opts.portFile] - Path to write the listening port
+ * @param {string} [opts.logFile]  - Path to write logs (startup also goes to stderr)
+ * @returns {Promise<{port: number, portFile: string, shutdown: () => Promise<void>}>}
+ */
+function start(opts = {}) {
+  const portFile = opts.portFile || process.env.HOSTBRIDGE_PORT_FILE || DEFAULT_PORT_FILE;
+  const logFile = opts.logFile || null;
+  const { log, dbg, endStartup, close: closeLog } = createLogger(logFile);
 
-const wss = new WebSocketServer({ server: httpServer });
+  const COMMANDS = resolveRegistry(log);
 
-wss.on('connection', (ws) => {
-  let child = null;
-  let started = false;
-  let timer = null;
-
-  function send(msg) {
-    if (ws.readyState === 1) { // OPEN
-      ws.send(JSON.stringify(msg));
-    }
+  const glimpseBinary = resolveGlimpseBinary();
+  if (glimpseBinary) {
+    COMMANDS.glimpse = {
+      exec: glimpseBinary,
+      transform: passthrough,
+      timeout: 0,
+    };
+    log(`[hostbridge] ${'glimpse'.padEnd(12)} -> ${glimpseBinary}`);
+  } else {
+    log(`[hostbridge] ${'glimpse'.padEnd(12)} -> (not found; npm install glimpseui)`);
   }
 
-  ws.on('message', (raw) => {
-    let msg;
-    try { msg = JSON.parse(raw); } catch { ws.close(1002, 'invalid json'); return; }
+  const children = new Set();
 
-    // First message must be exec
-    if (!started) {
-      if (msg.type !== 'exec') {
-        send({ type: 'error', message: 'first message must be exec' });
-        ws.close();
-        return;
+  const httpServer = http.createServer((_req, res) => {
+    res.writeHead(426, { 'Content-Type': 'text/plain' });
+    res.end('WebSocket connection required\n');
+  });
+
+  const wss = new WebSocketServer({ server: httpServer });
+
+  wss.on('connection', (ws) => {
+    let child = null;
+    let started = false;
+    let timer = null;
+
+    function send(msg) {
+      if (ws.readyState === 1) { // OPEN
+        ws.send(JSON.stringify(msg));
       }
-
-      const { cmd, args: rawArgs = [] } = msg;
-      const entry = COMMANDS[cmd];
-      if (!entry) {
-        console.log(`[hostbridge] reject ${cmd}: not opt-in listed or no implementation`);
-        send({ type: 'error', message: `${cmd}: not allowed` });
-        ws.close();
-        return;
-      }
-
-      let finalArgs;
-      try { finalArgs = entry.transform(rawArgs); } catch (err) {
-        console.log(`[hostbridge] reject ${cmd}: ${err.message}`);
-        send({ type: 'error', message: `${cmd}: ${err.message}` });
-        ws.close();
-        return;
-      }
-
-      console.log(`[hostbridge] run ${entry.exec} ${finalArgs.map(a => JSON.stringify(a)).join(' ')}`);
-
-      try {
-        child = spawn(entry.exec, finalArgs, {
-          stdio: ['pipe', 'pipe', 'pipe'],
-          detached: true,
-        });
-      } catch (err) {
-        send({ type: 'error', message: `${cmd}: ${err.message}` });
-        ws.close();
-        return;
-      }
-
-      children.add(child);
-      started = true;
-      dbg('spawned pid', child.pid);
-      send({ type: 'started' });
-
-      // Timeout (0 = disabled)
-      const timeoutMs = entry.timeout ?? DEFAULT_TIMEOUT_MS;
-      if (timeoutMs > 0) {
-        timer = setTimeout(() => {
-          dbg('timeout, killing process');
-          killGroup(child, 'SIGKILL');
-        }, timeoutMs);
-      }
-
-      child.stdout.on('data', (chunk) => {
-        send({ type: 'stdout', data: chunk.toString('base64') });
-      });
-
-      child.stderr.on('data', (chunk) => {
-        send({ type: 'stderr', data: chunk.toString('base64') });
-      });
-
-      child.on('close', (code) => {
-        dbg('child exited, code=', code);
-        if (timer) clearTimeout(timer);
-        children.delete(child);
-        send({ type: 'exit', code: code ?? 1 });
-        ws.close();
-      });
-
-      child.on('error', (err) => {
-        dbg('child error:', err.message);
-        if (timer) clearTimeout(timer);
-        children.delete(child);
-        send({ type: 'error', message: err.message });
-        ws.close();
-      });
-
-      return;
     }
 
-    // Post-start messages
-    switch (msg.type) {
-      case 'stdin':
-        if (msg.data) {
-          try { child.stdin.write(Buffer.from(msg.data, 'base64')); } catch {}
+    ws.on('message', (raw) => {
+      let msg;
+      try { msg = JSON.parse(raw); } catch { ws.close(1002, 'invalid json'); return; }
+
+      // First message must be exec
+      if (!started) {
+        if (msg.type !== 'exec') {
+          send({ type: 'error', message: 'first message must be exec' });
+          ws.close();
+          return;
         }
-        break;
-      case 'stdin-end':
-        try { child.stdin.end(); } catch {}
-        break;
-      case 'signal': {
-        const sig = msg.signal || 'SIGTERM';
-        console.log(`[hostbridge] signal ${sig} -> pid ${child.pid}`);
-        killGroup(child, sig);
-        break;
+
+        const { cmd, args: rawArgs = [] } = msg;
+        const entry = COMMANDS[cmd];
+        if (!entry) {
+          log(`[hostbridge] reject ${cmd}: not opt-in listed or no implementation`);
+          send({ type: 'error', message: `${cmd}: not allowed` });
+          ws.close();
+          return;
+        }
+
+        let finalArgs;
+        try { finalArgs = entry.transform(rawArgs); } catch (err) {
+          log(`[hostbridge] reject ${cmd}: ${err.message}`);
+          send({ type: 'error', message: `${cmd}: ${err.message}` });
+          ws.close();
+          return;
+        }
+
+        log(`[hostbridge] run ${entry.exec} ${finalArgs.map(a => JSON.stringify(a)).join(' ')}`);
+
+        try {
+          child = spawn(entry.exec, finalArgs, {
+            stdio: ['pipe', 'pipe', 'pipe'],
+            detached: true,
+          });
+        } catch (err) {
+          send({ type: 'error', message: `${cmd}: ${err.message}` });
+          ws.close();
+          return;
+        }
+
+        children.add(child);
+        started = true;
+        dbg('spawned pid', child.pid);
+        send({ type: 'started' });
+
+        // Timeout (0 = disabled)
+        const timeoutMs = entry.timeout ?? DEFAULT_TIMEOUT_MS;
+        if (timeoutMs > 0) {
+          timer = setTimeout(() => {
+            dbg('timeout, killing process');
+            killGroup(child, 'SIGKILL');
+          }, timeoutMs);
+        }
+
+        child.stdout.on('data', (chunk) => {
+          send({ type: 'stdout', data: chunk.toString('base64') });
+        });
+
+        child.stderr.on('data', (chunk) => {
+          send({ type: 'stderr', data: chunk.toString('base64') });
+        });
+
+        child.on('close', (code) => {
+          dbg('child exited, code=', code);
+          if (timer) clearTimeout(timer);
+          children.delete(child);
+          send({ type: 'exit', code: code ?? 1 });
+          ws.close();
+        });
+
+        child.on('error', (err) => {
+          dbg('child error:', err.message);
+          if (timer) clearTimeout(timer);
+          children.delete(child);
+          send({ type: 'error', message: err.message });
+          ws.close();
+        });
+
+        return;
       }
-    }
-  });
 
-  // Client disconnect → kill process
-  ws.on('close', () => {
-    if (timer) clearTimeout(timer);
-    if (child && !child.killed) {
-      console.log(`[hostbridge] client disconnected, killing pid ${child.pid}`);
-      killGroup(child, 'SIGTERM');
-      setTimeout(() => killGroup(child, 'SIGKILL'), SHUTDOWN_GRACE_MS).unref();
-    }
-  });
-
-  ws.on('error', (err) => {
-    dbg('ws error:', err.message);
-  });
-});
-
-// ---------- startup ----------
-
-httpServer.listen(0, HOST, () => {
-  const port = httpServer.address().port;
-  fs.writeFileSync(PORT_FILE, String(port) + '\n');
-  console.log(`[hostbridge] ${PLATFORM} listening on ws://${HOST}:${port} (written to ${PORT_FILE})`);
-});
-
-// ---------- shutdown ----------
-
-function shutdown() {
-  console.log('[hostbridge] shutting down');
-  for (const child of children) killGroup(child, 'SIGTERM');
-  setTimeout(() => {
-    for (const child of children) killGroup(child, 'SIGKILL');
-    wss.close();
-    httpServer.close(() => {
-      try { fs.unlinkSync(PORT_FILE); } catch {}
-      process.exit(0);
+      // Post-start messages
+      switch (msg.type) {
+        case 'stdin':
+          if (msg.data) {
+            try { child.stdin.write(Buffer.from(msg.data, 'base64')); } catch {}
+          }
+          break;
+        case 'stdin-end':
+          try { child.stdin.end(); } catch {}
+          break;
+        case 'signal': {
+          const sig = msg.signal || 'SIGTERM';
+          log(`[hostbridge] signal ${sig} -> pid ${child.pid}`);
+          killGroup(child, sig);
+          break;
+        }
+      }
     });
-  }, SHUTDOWN_GRACE_MS).unref();
+
+    // Client disconnect → kill process
+    ws.on('close', () => {
+      if (timer) clearTimeout(timer);
+      if (child && !child.killed) {
+        log(`[hostbridge] client disconnected, killing pid ${child.pid}`);
+        killGroup(child, 'SIGTERM');
+        setTimeout(() => killGroup(child, 'SIGKILL'), SHUTDOWN_GRACE_MS).unref();
+      }
+    });
+
+    ws.on('error', (err) => {
+      dbg('ws error:', err.message);
+    });
+  });
+
+  // Return a promise that resolves when the server is listening
+  return new Promise((resolve, reject) => {
+    httpServer.on('error', reject);
+    httpServer.listen(0, HOST, () => {
+      const port = httpServer.address().port;
+      fs.writeFileSync(portFile, String(port) + '\n');
+      log(`[hostbridge] ${PLATFORM} listening on ws://${HOST}:${port} (written to ${portFile})`);
+      endStartup();
+
+      const shutdown = () => new Promise((res) => {
+        log('[hostbridge] shutting down');
+        closeLog();
+        for (const child of children) killGroup(child, 'SIGTERM');
+        setTimeout(() => {
+          for (const child of children) killGroup(child, 'SIGKILL');
+          wss.close();
+          httpServer.close(() => {
+            try { fs.unlinkSync(portFile); } catch {}
+            res();
+          });
+        }, SHUTDOWN_GRACE_MS).unref();
+      });
+
+      resolve({ port, portFile, shutdown });
+    });
+  });
 }
 
-process.on('SIGTERM', shutdown);
-process.on('SIGINT',  shutdown);
+module.exports = { start };
+
+// ---------- standalone mode ----------
+
+if (require.main === module) {
+  const args = process.argv.slice(2);
+  const opts = {};
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--log-file' && args[i + 1]) { opts.logFile = args[++i]; }
+    else if (args[i] === '--port-file' && args[i + 1]) { opts.portFile = args[++i]; }
+    else if (args[i] === '--help' || args[i] === '-h') {
+      console.log('Usage: hostbridge.js [--log-file PATH] [--port-file PATH]');
+      process.exit(0);
+    }
+  }
+  start(opts).then(({ shutdown }) => {
+    const exit = () => shutdown().then(() => process.exit(0));
+    process.on('SIGTERM', exit);
+    process.on('SIGINT',  exit);
+  }).catch((err) => {
+    console.error(`[hostbridge] ${err.message}`);
+    process.exit(1);
+  });
+}

@@ -267,9 +267,28 @@ function main() {
   const groups = extraGroupSpecs(groupCsv);
   if (groups) args.push("--env", `CONTAGENT_EXTRA_GROUP_SPECS=${groups}`);
 
-  const run = cp.spawnSync("docker", [...args, image, ...parsed.command], { stdio: "inherit" });
-  if (run.error) die(run.error.message);
-  process.exit(typeof run.status === "number" ? run.status : 1);
+  // Start hostbridge, run docker, then shut down hostbridge
+  const hostbridge = require("./hostbridge.js");
+  hostbridge.start({ logFile: ".hostbridge-log" }).then(({ port, portFile, shutdown }) => {
+    // Pass the hostbridge port to the container
+    args.push("--env", `HOSTBRIDGE_PORT=${port}`);
+
+    const docker = cp.spawn("docker", [...args, image, ...parsed.command], { stdio: "inherit" });
+
+    const cleanup = (code) => {
+      shutdown().then(() => process.exit(typeof code === "number" ? code : 1));
+    };
+
+    docker.on("close", cleanup);
+    docker.on("error", (err) => { die(err.message); });
+
+    // Forward signals to docker and then clean up
+    for (const sig of ["SIGINT", "SIGTERM"]) {
+      process.on(sig, () => {
+        docker.kill(sig);
+      });
+    }
+  }).catch((err) => die(err.message));
 }
 
 main();

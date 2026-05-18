@@ -304,4 +304,32 @@ if [ "${#extra_group_gids[@]}" -gt 0 ]; then
   docker_args+=(--env "CONTAGENT_EXTRA_GROUP_SPECS=$(IFS=,; printf '%s' "${extra_group_specs[*]}")")
 fi
 
-exec docker run "${docker_args[@]}" "$CONTAGENT_IMAGE" "${command[@]}"
+# Start hostbridge in the background
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+HOSTBRIDGE_PID=
+cleanup_hostbridge() {
+  if [ -n "$HOSTBRIDGE_PID" ] && kill -0 "$HOSTBRIDGE_PID" 2>/dev/null; then
+    kill "$HOSTBRIDGE_PID" 2>/dev/null
+    wait "$HOSTBRIDGE_PID" 2>/dev/null
+  fi
+}
+trap cleanup_hostbridge EXIT
+
+"$SCRIPT_DIR/hostbridge.js" --log-file .hostbridge-log &
+HOSTBRIDGE_PID=$!
+
+# Wait for port file to appear
+PORT_FILE="${HOSTBRIDGE_PORT_FILE:-.hostbridge-port}"
+for _i in $(seq 1 50); do
+  [ -s "$PORT_FILE" ] && break
+  sleep 0.1
+done
+[ -s "$PORT_FILE" ] || die "hostbridge failed to start"
+HOSTBRIDGE_PORT=$(cat "$PORT_FILE")
+docker_args+=(--env "HOSTBRIDGE_PORT=$HOSTBRIDGE_PORT")
+
+docker run "${docker_args[@]}" "$CONTAGENT_IMAGE" "${command[@]}"
+exit_code=$?
+
+cleanup_hostbridge
+exit "$exit_code"
