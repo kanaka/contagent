@@ -179,7 +179,8 @@ def main() -> None:
     if not parts:
         die("no features selected")
 
-    runtime_config = {"version": schema_version, "features": runtime_features}
+    hostbridge_config = manifest.get("hostbridge") or {}
+    runtime_config = {"version": schema_version, "features": runtime_features, "hostbridge": hostbridge_config}
     runtime_config_id = hashlib.sha256(
         yaml.safe_dump(runtime_config, sort_keys=False).encode()
     ).hexdigest()
@@ -187,6 +188,7 @@ def main() -> None:
         "version": schema_version,
         "image-hash": runtime_config_id,
         "features": runtime_features,
+        "hostbridge": hostbridge_config,
     }
     default_config_file.write_text(yaml.safe_dump(runtime_config, sort_keys=False))
 

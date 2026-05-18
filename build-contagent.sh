@@ -205,6 +205,19 @@ done <<<"$feature_rows"
 
 [ "${#unknown[@]}" -eq 0 ] || die "unknown feature(s): $(printf '%s\n' "${!unknown[@]}" | sort -u | paste -sd',' -)"
 
+# Append hostbridge section from manifest
+if command -v yq >/dev/null 2>&1; then
+  hostbridge_section=$(yq '.hostbridge' "$manifest_file" 2>/dev/null || true)
+  if [ -n "$hostbridge_section" ] && [ "$hostbridge_section" != 'null' ]; then
+    printf '\nhostbridge:\n' >> "$runtime_config_body"
+    yq '.hostbridge' "$manifest_file" | sed 's/^/  /' >> "$runtime_config_body"
+  else
+    printf '\nhostbridge: {}\n' >> "$runtime_config_body"
+  fi
+else
+  printf '\nhostbridge: {}\n' >> "$runtime_config_body"
+fi
+
 runtime_config_id=$(sha256_file "$runtime_config_body")
 {
   printf 'version: %s\n\n' "$schema_version"

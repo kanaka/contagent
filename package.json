@@ -3,6 +3,7 @@
   "description": "Host-side dependencies for contagent hostbridge",
   "dependencies": {
     "ws": "^8.18.0",
+    "yaml": "^2.7.0",
     "glimpseui": "^0.8.0"
   }
 }

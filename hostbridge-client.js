@@ -77,6 +77,10 @@ ws.addEventListener('message', (event) => {
       setupStdin();
       break;
 
+    case 'pending':
+      if (msg.message) process.stderr.write(`${cmd}: ${msg.message}\n`);
+      break;
+
     case 'stdout':
       if (msg.data) {
         try { process.stdout.write(Buffer.from(msg.data, 'base64')); } catch {}

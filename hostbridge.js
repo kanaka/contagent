@@ -2,421 +2,384 @@
 /*
  * hostbridge.js
  *
- * Runs on the host (macOS or Linux). Listens for WebSocket connections from
- * sandboxed containers and runs a small opt-in list of commands on their behalf.
+ * Runs on the host. Listens for WebSocket connections from sandboxed
+ * containers and runs a small opt-in list of commands on their behalf.
  *
- * Each WebSocket connection represents exactly one command execution. The
- * connection lifetime matches the process lifetime: stdin/stdout/stderr flow
- * as WebSocket messages, signals are forwarded via messages, and closing the
- * connection kills the process.
+ * One WebSocket = one command. Connection lifetime = process lifetime.
+ * stdin/stdout/stderr and signals flow as JSON messages.
  *
- * Can be used as a library: require('./hostbridge.js').start({ logFile, portFile })
- * Or run directly: ./hostbridge.js [--log-file path] [--port-file path]
+ * Access control: hostbridge.rules in YAML config (allow/deny/prompt).
+ * Prompted commands show a native Glimpse dialog on the host.
+ * Decisions persist in .hostbridge-state.yaml (session or always scope).
  *
- * See hostbridge.md for the full protocol specification.
+ * Library: require('./hostbridge.js').start({ configFile, logFile, ... })
+ * Standalone: ./hostbridge.js [--config-file PATH] [--log-file PATH] ...
  *
- * Dependencies: ws, glimpseui (optional)
- * Node 18+.
+ * Dependencies: ws, yaml, glimpseui (optional). Node 18+.
  */
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
-
-let WebSocketServer;
-try {
-  ({ WebSocketServer } = require('ws'));
-} catch {
-  console.error('[hostbridge] Error: ws package not installed. Run: npm install');
-  process.exit(1);
-}
+const { WebSocketServer } = require('ws');
+const YAML = require('yaml');
 
 const HOST = '127.0.0.1';
-const DEFAULT_PORT_FILE = '.hostbridge-port';
-const DEFAULT_TIMEOUT_MS = 60_000;
-const SHUTDOWN_GRACE_MS = 2_000;
 const PLATFORM = process.platform;
 const DEBUG = process.env.HOSTBRIDGE_DEBUG === '1';
+const DEFAULTS = {
+  portFile: '.hostbridge-port',
+  stateFile: '.hostbridge-state.yaml',
+  timeout: 60_000,
+  shutdownGrace: 2_000,
+};
 
-// ---------- argument validators / transformers ----------
+// ---------- argument validators ----------
 
 function audioFile(args) {
-  const positional = args.filter(a => !a.startsWith('-'));
-  if (positional.length !== 1) throw new Error('expected one file path');
-  return [positional[0]];
+  const pos = args.filter(a => !a.startsWith('-'));
+  if (pos.length !== 1) throw new Error('expected one file path');
+  return [pos[0]];
 }
 
-function ttsText(args) {
-  return args.filter(a => !a.startsWith('-'));
+function ttsText(args) { return args.filter(a => !a.startsWith('-')); }
+
+function notifyOsascript(args) {
+  const pos = args.filter(a => !a.startsWith('-'));
+  return ['-e', 'on run argv\n display notification (item 2 of argv) with title (item 1 of argv)\nend run',
+    pos[0] || 'Notification', pos[1] || ''];
 }
 
-function notifyForOsascript(args) {
-  const positional = args.filter(a => !a.startsWith('-'));
-  const title = positional[0] || 'Notification';
-  const body = positional[1] || '';
-  return [
-    '-e',
-    'on run argv\n display notification (item 2 of argv) with title (item 1 of argv)\nend run',
-    title,
-    body,
-  ];
-}
-
-function notifyForNotifySend(args) {
-  const positional = args.filter(a => !a.startsWith('-'));
-  return [positional[0] || 'Notification', positional[1] || ''];
+function notifyLinux(args) {
+  const pos = args.filter(a => !a.startsWith('-'));
+  return [pos[0] || 'Notification', pos[1] || ''];
 }
 
 function urlOnly(args) {
-  const positional = args.filter(a => !a.startsWith('-'));
-  if (positional.length !== 1) throw new Error('expected one URL');
-  if (!/^https?:\/\//i.test(positional[0])) throw new Error('only http(s) URLs');
-  return [positional[0]];
+  const pos = args.filter(a => !a.startsWith('-'));
+  if (pos.length !== 1) throw new Error('expected one URL');
+  if (!/^https?:\/\//i.test(pos[0])) throw new Error('only http(s) URLs');
+  return [pos[0]];
 }
 
 function clipboardWrite(args) {
-  if (args.some(a => a === '-o' || a === '-out' || a === '--output')) {
+  if (args.some(a => ['-o', '-out', '--output'].includes(a)))
     throw new Error('clipboard read not exposed');
-  }
   return [];
-}
-
-function passthrough(args) {
-  return args;
 }
 
 // ---------- registry ----------
 
 const REGISTRY = {
-  paplay: {
-    candidates: {
-      darwin: [
-        { exec: 'afplay', transform: audioFile },
-      ],
-      linux: [
-        { exec: 'paplay', transform: audioFile },
-        { exec: 'ffplay', transform: a => ['-nodisp', '-autoexit', '-loglevel', 'quiet', ...audioFile(a)] },
-        { exec: 'mpv',    transform: a => ['--no-video', '--really-quiet', ...audioFile(a)] },
-        { exec: 'aplay',  transform: a => ['-q', ...audioFile(a)] },
-      ],
-    },
-  },
-  say: {
-    candidates: {
-      darwin: [{ exec: 'say', transform: ttsText }],
-      linux: [
-        { exec: 'spd-say', transform: ttsText },
-        { exec: 'espeak',  transform: ttsText },
-      ],
-    },
-  },
-  'notify-send': {
-    candidates: {
-      darwin: [{ exec: 'osascript',   transform: notifyForOsascript }],
-      linux:  [{ exec: 'notify-send', transform: notifyForNotifySend }],
-    },
-  },
-  'xdg-open': {
-    candidates: {
-      darwin: [{ exec: 'open',     transform: urlOnly }],
-      linux:  [{ exec: 'xdg-open', transform: urlOnly }],
-    },
-  },
-  pbcopy: {
-    candidates: {
-      darwin: [{ exec: 'pbcopy', transform: clipboardWrite }],
-      linux: [
-        { exec: 'wl-copy', transform: clipboardWrite },
-        { exec: 'xclip',   transform: a => ['-selection', 'clipboard', ...clipboardWrite(a)] },
-        { exec: 'xsel',    transform: a => ['--clipboard', '--input',  ...clipboardWrite(a)] },
-      ],
-    },
-  },
+  paplay: { darwin: [['afplay', audioFile]],
+    linux: [['paplay', audioFile],
+      ['ffplay', a => ['-nodisp', '-autoexit', '-loglevel', 'quiet', ...audioFile(a)]],
+      ['mpv', a => ['--no-video', '--really-quiet', ...audioFile(a)]],
+      ['aplay', a => ['-q', ...audioFile(a)]]] },
+  say:    { darwin: [['say', ttsText]],
+    linux: [['spd-say', ttsText], ['espeak', ttsText]] },
+  'notify-send': { darwin: [['osascript', notifyOsascript]],
+    linux: [['notify-send', notifyLinux]] },
+  'xdg-open': { darwin: [['open', urlOnly]], linux: [['xdg-open', urlOnly]] },
+  pbcopy: { darwin: [['pbcopy', clipboardWrite]],
+    linux: [['wl-copy', clipboardWrite],
+      ['xclip', a => ['-selection', 'clipboard', ...clipboardWrite(a)]],
+      ['xsel', a => ['--clipboard', '--input', ...clipboardWrite(a)]]] },
 };
 
-const ALIASES = {
-  aplay: 'paplay',
-  play: 'paplay',
-  'wl-copy': 'pbcopy',
-  xclip: 'pbcopy',
-  xsel: 'pbcopy',
-};
+const ALIASES = { aplay: 'paplay', play: 'paplay', 'wl-copy': 'pbcopy', xclip: 'pbcopy', xsel: 'pbcopy' };
 
-// ---------- startup resolution ----------
+// ---------- helpers ----------
 
 function which(exec) {
   const r = spawnSync('sh', ['-c', 'command -v "$1"', 'sh', exec], { encoding: 'utf8' });
-  return r.status === 0 && r.stdout.trim() ? r.stdout.trim() : null;
+  return r.status === 0 && r.stdout.trim() || null;
 }
 
-function resolveRegistry(log) {
-  const resolved = {};
-  for (const [name, entry] of Object.entries(REGISTRY)) {
-    const cands = (entry.candidates && entry.candidates[PLATFORM]) || [];
-    let picked = null;
-    for (const c of cands) {
-      const found = which(c.exec);
-      if (found) { picked = { ...c, resolvedPath: found }; break; }
-    }
-    if (picked) {
-      resolved[name] = {
-        exec: picked.resolvedPath,
-        transform: picked.transform,
-      };
-      log(`[hostbridge] ${name.padEnd(12)} -> ${picked.resolvedPath}`);
-    } else {
-      log(`[hostbridge] ${name.padEnd(12)} -> (no implementation on ${PLATFORM})`);
-    }
-  }
-  for (const [alias, target] of Object.entries(ALIASES)) {
-    if (resolved[target]) resolved[alias] = resolved[target];
-  }
-  return resolved;
+function killGroup(child, sig) { try { process.kill(-child.pid, sig); } catch {} }
+
+function readYamlRules(file, key) {
+  try {
+    const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+    const src = key ? doc?.[key] : doc;
+    return Array.isArray(src?.rules) ? src.rules : [];
+  } catch { return []; }
+}
+
+function writeYamlRules(file, rules, log) {
+  try {
+    fs.writeFileSync(file,
+      '# Hostbridge access decisions — edit or delete entries to change behavior\n' +
+      '# Session entries (with pid) expire when their hostbridge process exits\n\n' +
+      YAML.stringify({ rules }, { lineWidth: 0 }));
+  } catch (err) { log(`[hostbridge] WARN: write ${file}: ${err.message}`); }
+}
+
+function findMatchingRule(rules, cmd, args) {
+  const myPid = process.pid;
+  const ok = rules.filter(r => r.cmd === cmd && (r.scope !== 'session' || r.pid === myPid));
+  // Specific args beat any-args
+  const argsKey = JSON.stringify(args);
+  return (ok.find(r => Array.isArray(r.args) && JSON.stringify(r.args) === argsKey)
+       || ok.find(r => r.args === 'any'))?.access ?? null;
 }
 
 function resolveGlimpseBinary() {
   try {
-    const mainEntry = require.resolve('glimpseui');
-    const candidate = path.join(path.dirname(mainEntry), 'glimpse');
-    if (fs.existsSync(candidate)) return candidate;
+    const entry = require.resolve('glimpseui');
+    const bin = path.join(path.dirname(entry), 'glimpse');
+    if (fs.existsSync(bin)) return bin;
   } catch {}
   return which('glimpse');
 }
 
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
 // ---------- logging ----------
 
 function createLogger(logFile) {
-  let stream = null;
+  const stream = logFile ? fs.createWriteStream(logFile, { flags: 'w' }) : null;
   let startup = true;
-
-  if (logFile) {
-    stream = fs.createWriteStream(logFile, { flags: 'w' });
-  }
-
-  function log(msg) {
-    // Always write to log file if configured
+  const log = (msg) => {
     if (stream) stream.write(msg + '\n');
-    // During startup: always write to stderr (visible in terminal)
-    // After startup: only write to stderr if no log file (fallback)
-    if (startup || !stream) {
-      process.stderr.write(msg + '\n');
-    }
-  }
-
-  function dbg(...args) {
-    if (!DEBUG) return;
-    log('[hostbridge:dbg] ' + args.join(' '));
-  }
-
-  function endStartup() {
-    if (stream) {
-      log(`[hostbridge] logging to ${logFile}`);
-    }
-    startup = false;
-  }
-
-  function close() {
-    if (stream) { try { stream.end(); } catch {} }
-  }
-
-  return { log, dbg, endStartup, close };
+    if (startup || !stream) process.stderr.write(msg + '\n');
+  };
+  const dbg = (...a) => { if (DEBUG) log('[hostbridge:dbg] ' + a.join(' ')); };
+  return { log, dbg,
+    seal() { if (stream) log(`[hostbridge] logging to ${logFile}`); startup = false; },
+    close() { if (stream) try { stream.end(); } catch {} } };
 }
 
-// ---------- process management ----------
+// ---------- access control ----------
 
-function killGroup(child, signal) {
-  try { process.kill(-child.pid, signal); } catch {}
+function getAccessLevel(cmd, rawArgs, configFile, stateFile) {
+  // Config rules (allow/deny = immediate)
+  const cfgMatch = findMatchingRule(readYamlRules(configFile, 'hostbridge'), cmd, rawArgs);
+  if (cfgMatch === 'allow' || cfgMatch === 'deny') return cfgMatch;
+  // State rules (session + always decisions)
+  return findMatchingRule(readYamlRules(stateFile, null), cmd, rawArgs) || 'prompt';
 }
 
-// ---------- start / stop API ----------
+function saveRule(stateFile, rule, log) {
+  const rules = readYamlRules(stateFile, null).filter(r => {
+    if (r.cmd !== rule.cmd) return true;
+    // Remove conflicting: same cmd + same args class
+    if (rule.args === 'any' && r.args === 'any') return false;
+    if (Array.isArray(rule.args) && Array.isArray(r.args) &&
+        JSON.stringify(rule.args) === JSON.stringify(r.args)) return false;
+    return true;
+  });
+  rules.push(rule);
+  writeYamlRules(stateFile, rules, log);
+}
 
-/**
- * Start the hostbridge server.
- * @param {object} [opts]
- * @param {string} [opts.portFile] - Path to write the listening port
- * @param {string} [opts.logFile]  - Path to write logs (startup also goes to stderr)
- * @returns {Promise<{port: number, portFile: string, shutdown: () => Promise<void>}>}
- */
+function cleanupStaleEntries(stateFile, log) {
+  const rules = readYamlRules(stateFile, null);
+  if (!rules.length) return;
+  const live = rules.filter(r => {
+    if (r.scope !== 'session') return true;
+    try { process.kill(r.pid, 0); return true; } catch { return false; }
+  });
+  if (live.length < rules.length) {
+    log(`[hostbridge] cleaned ${rules.length - live.length} stale session entry(s)`);
+    writeYamlRules(stateFile, live, log);
+  }
+}
+
+// ---------- Glimpse prompt ----------
+
+let _prompt = null;
+async function showPrompt(cmd, args, log) {
+  try {
+    if (!_prompt) _prompt = (await import('glimpseui')).prompt;
+    const cmdH = esc(cmd), argsH = args.length ? args.map(esc).join(' ') : '<em style="color:#666">none</em>';
+    return await _prompt(`<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="margin:0;font-family:system-ui,-apple-system,sans-serif;background:#1c1c1e;color:#e5e5e7;-webkit-font-smoothing:antialiased">
+<div style="padding:20px 24px;display:flex;flex-direction:column;height:100vh;box-sizing:border-box">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+    <span style="font-size:20px">🛡️</span>
+    <span style="font-size:15px;font-weight:600;color:#fff">Host Command Approval</span></div>
+  <div style="background:#2c2c2e;border-radius:8px;padding:12px 14px;margin-bottom:18px;font-family:'SF Mono',Menlo,Consolas,monospace;font-size:12px;line-height:1.6;word-break:break-all">
+    <span style="color:#64d2ff;font-weight:600">${cmdH}</span> ${argsH}</div>
+  <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px">
+    ${['Action|sel-a|allow:Allow,deny:Deny','Scope|sel-s|once:Once,session:This Session,always:Always',
+       'Args|sel-r|these:Only These Args,any:Any Args'].map(r => {
+      const [label, id, opts] = r.split('|');
+      return `<div style="display:flex;align-items:center;gap:10px"><label style="width:50px;font-size:12px;color:#98989d;flex-shrink:0">${label}</label><select id="${id}" style="flex:1;padding:7px 10px;border:1px solid #48484a;border-radius:6px;background:#2c2c2e;color:#e5e5e7;font-size:13px;font-family:inherit">${opts.split(',').map((o,i) => { const [v,t] = o.split(':'); return `<option value="${v}"${i===0?' selected':''}>${t}</option>`; }).join('')}</select></div>`;
+    }).join('\n    ')}
+  </div>
+  <div style="display:flex;gap:8px;margin-top:auto;justify-content:flex-end">
+    <button onclick="window.glimpse.close()" style="padding:9px 20px;border:none;border-radius:8px;font-size:13px;cursor:pointer;background:#3a3a3c;color:#e5e5e7">Cancel</button>
+    <button onclick="S()" style="padding:9px 20px;border:none;border-radius:8px;font-size:13px;cursor:pointer;background:#0a84ff;color:#fff;font-weight:600">Confirm</button></div>
+</div>
+<script>function S(){window.glimpse.send({action:document.getElementById('sel-a').value,scope:document.getElementById('sel-s').value,args:document.getElementById('sel-r').value})}
+document.addEventListener('keydown',e=>{if(e.key==='Enter')S();if(e.key==='Escape')window.glimpse.close()})</script>
+</body></html>`, { width: 440, height: 310, title: 'Hostbridge', frameless: true }) || null;
+  } catch (err) { log(`[hostbridge] prompt error: ${err.message}`); return null; }
+}
+
+// ---------- start ----------
+
 function start(opts = {}) {
-  const portFile = opts.portFile || process.env.HOSTBRIDGE_PORT_FILE || DEFAULT_PORT_FILE;
-  const logFile = opts.logFile || null;
-  const { log, dbg, endStartup, close: closeLog } = createLogger(logFile);
+  const portFile  = opts.portFile  || process.env.HOSTBRIDGE_PORT_FILE  || DEFAULTS.portFile;
+  const configFile= opts.configFile|| process.env.HOSTBRIDGE_CONFIG_FILE|| null;
+  const stateFile = opts.stateFile || process.env.HOSTBRIDGE_STATE_FILE || DEFAULTS.stateFile;
+  const { log, dbg, seal, close: closeLog } = createLogger(opts.logFile || null);
 
-  const COMMANDS = resolveRegistry(log);
-
-  const glimpseBinary = resolveGlimpseBinary();
-  if (glimpseBinary) {
-    COMMANDS.glimpse = {
-      exec: glimpseBinary,
-      transform: passthrough,
-      timeout: 0,
-    };
-    log(`[hostbridge] ${'glimpse'.padEnd(12)} -> ${glimpseBinary}`);
-  } else {
-    log(`[hostbridge] ${'glimpse'.padEnd(12)} -> (not found; npm install glimpseui)`);
+  // Resolve commands
+  const COMMANDS = {};
+  for (const [name, platforms] of Object.entries(REGISTRY)) {
+    for (const [exec, transform] of (platforms[PLATFORM] || [])) {
+      const found = which(exec);
+      if (found) { COMMANDS[name] = { exec: found, transform }; break; }
+    }
+    log(`[hostbridge] ${name.padEnd(12)} -> ${COMMANDS[name]?.exec || `(no implementation on ${PLATFORM})`}`);
   }
+  for (const [alias, target] of Object.entries(ALIASES))
+    if (COMMANDS[target]) COMMANDS[alias] = COMMANDS[target];
+
+  const glimpseBin = resolveGlimpseBinary();
+  if (glimpseBin) COMMANDS.glimpse = { exec: glimpseBin, transform: a => a, timeout: 0 };
+  log(`[hostbridge] ${'glimpse'.padEnd(12)} -> ${glimpseBin || '(not found; npm install glimpseui)'}`);
+
+  log(`[hostbridge] access config: ${configFile || 'none (all commands → prompt)'}`);
+  log(`[hostbridge] access state:  ${stateFile}`);
+  cleanupStaleEntries(stateFile, log);
 
   const children = new Set();
-
   const httpServer = http.createServer((_req, res) => {
-    res.writeHead(426, { 'Content-Type': 'text/plain' });
-    res.end('WebSocket connection required\n');
+    res.writeHead(426).end('WebSocket connection required\n');
   });
-
   const wss = new WebSocketServer({ server: httpServer });
 
   wss.on('connection', (ws) => {
-    let child = null;
-    let started = false;
-    let timer = null;
+    let child = null, started = false, pending = false, timer = null;
 
-    function send(msg) {
-      if (ws.readyState === 1) { // OPEN
-        ws.send(JSON.stringify(msg));
-      }
-    }
+    const send = (msg) => { if (ws.readyState === 1) ws.send(JSON.stringify(msg)); };
+    const reject = (msg) => { send({ type: 'error', message: msg }); ws.close(); };
 
-    ws.on('message', (raw) => {
+    ws.on('message', async (raw) => {
       let msg;
-      try { msg = JSON.parse(raw); } catch { ws.close(1002, 'invalid json'); return; }
+      try { msg = JSON.parse(raw); } catch { ws.close(1002); return; }
 
-      // First message must be exec
       if (!started) {
-        if (msg.type !== 'exec') {
-          send({ type: 'error', message: 'first message must be exec' });
-          ws.close();
-          return;
-        }
+        if (pending) return;
+        if (msg.type !== 'exec') return reject('first message must be exec');
 
         const { cmd, args: rawArgs = [] } = msg;
         const entry = COMMANDS[cmd];
-        if (!entry) {
-          log(`[hostbridge] reject ${cmd}: not opt-in listed or no implementation`);
-          send({ type: 'error', message: `${cmd}: not allowed` });
-          ws.close();
-          return;
-        }
+        if (!entry) { log(`[hostbridge] reject ${cmd}: unknown`); return reject(`${cmd}: not allowed`); }
 
         let finalArgs;
-        try { finalArgs = entry.transform(rawArgs); } catch (err) {
-          log(`[hostbridge] reject ${cmd}: ${err.message}`);
-          send({ type: 'error', message: `${cmd}: ${err.message}` });
-          ws.close();
-          return;
+        try { finalArgs = entry.transform(rawArgs); } catch (e) {
+          log(`[hostbridge] reject ${cmd}: ${e.message}`);
+          return reject(`${cmd}: ${e.message}`);
         }
 
+        // Access control
+        const level = getAccessLevel(cmd, rawArgs, configFile, stateFile);
+        dbg('access:', cmd, '->', level);
+
+        if (level === 'deny') {
+          log(`[hostbridge] deny ${cmd}`);
+          return reject(`${cmd}: denied by access policy`);
+        }
+
+        if (level === 'prompt') {
+          if (!glimpseBin) {
+            log(`[hostbridge] deny ${cmd}: no UI for prompt`);
+            return reject(`${cmd}: denied (no UI available for approval)`);
+          }
+          pending = true;
+          const preview = [cmd, ...rawArgs].join(' ');
+          log(`[hostbridge] prompt: ${preview}`);
+          send({ type: 'pending', message: `Waiting for host approval: ${preview}` });
+
+          const result = await showPrompt(cmd, rawArgs, log);
+          pending = false;
+          if (ws.readyState !== 1) return;
+
+          if (!result) { log(`[hostbridge] ${cmd}: cancelled`); return reject(`${cmd}: denied by user`); }
+
+          const { action, scope, args: argsChoice } = result;
+          if (scope !== 'once') {
+            const rule = { cmd, access: action, args: argsChoice === 'any' ? 'any' : rawArgs, scope };
+            if (scope === 'session') rule.pid = process.pid;
+            saveRule(stateFile, rule, log);
+          }
+          log(`[hostbridge] ${cmd}: ${action} ${scope}`);
+          if (action !== 'allow') return reject(`${cmd}: denied by user`);
+        }
+
+        // Spawn
         log(`[hostbridge] run ${entry.exec} ${finalArgs.map(a => JSON.stringify(a)).join(' ')}`);
-
         try {
-          child = spawn(entry.exec, finalArgs, {
-            stdio: ['pipe', 'pipe', 'pipe'],
-            detached: true,
-          });
-        } catch (err) {
-          send({ type: 'error', message: `${cmd}: ${err.message}` });
-          ws.close();
-          return;
-        }
+          child = spawn(entry.exec, finalArgs, { stdio: ['pipe','pipe','pipe'], detached: true });
+        } catch (err) { return reject(`spawn failed: ${err.message}`); }
 
         children.add(child);
         started = true;
-        dbg('spawned pid', child.pid);
         send({ type: 'started' });
 
-        // Timeout (0 = disabled)
-        const timeoutMs = entry.timeout ?? DEFAULT_TIMEOUT_MS;
-        if (timeoutMs > 0) {
-          timer = setTimeout(() => {
-            dbg('timeout, killing process');
-            killGroup(child, 'SIGKILL');
-          }, timeoutMs);
-        }
+        const timeoutMs = entry.timeout ?? DEFAULTS.timeout;
+        if (timeoutMs > 0) timer = setTimeout(() => killGroup(child, 'SIGKILL'), timeoutMs);
 
-        child.stdout.on('data', (chunk) => {
-          send({ type: 'stdout', data: chunk.toString('base64') });
-        });
-
-        child.stderr.on('data', (chunk) => {
-          send({ type: 'stderr', data: chunk.toString('base64') });
-        });
-
-        child.on('close', (code) => {
-          dbg('child exited, code=', code);
+        child.stdout.on('data', c => send({ type: 'stdout', data: c.toString('base64') }));
+        child.stderr.on('data', c => send({ type: 'stderr', data: c.toString('base64') }));
+        child.on('close', code => {
           if (timer) clearTimeout(timer);
           children.delete(child);
           send({ type: 'exit', code: code ?? 1 });
           ws.close();
         });
-
-        child.on('error', (err) => {
-          dbg('child error:', err.message);
+        child.on('error', err => {
           if (timer) clearTimeout(timer);
           children.delete(child);
-          send({ type: 'error', message: err.message });
-          ws.close();
+          reject(err.message);
         });
-
         return;
       }
 
       // Post-start messages
-      switch (msg.type) {
-        case 'stdin':
-          if (msg.data) {
-            try { child.stdin.write(Buffer.from(msg.data, 'base64')); } catch {}
-          }
-          break;
-        case 'stdin-end':
-          try { child.stdin.end(); } catch {}
-          break;
-        case 'signal': {
-          const sig = msg.signal || 'SIGTERM';
-          log(`[hostbridge] signal ${sig} -> pid ${child.pid}`);
-          killGroup(child, sig);
-          break;
-        }
+      if (msg.type === 'stdin' && msg.data) try { child.stdin.write(Buffer.from(msg.data, 'base64')); } catch {}
+      else if (msg.type === 'stdin-end') try { child.stdin.end(); } catch {}
+      else if (msg.type === 'signal') {
+        const sig = msg.signal || 'SIGTERM';
+        log(`[hostbridge] signal ${sig} -> pid ${child.pid}`);
+        killGroup(child, sig);
       }
     });
 
-    // Client disconnect → kill process
     ws.on('close', () => {
       if (timer) clearTimeout(timer);
       if (child && !child.killed) {
         log(`[hostbridge] client disconnected, killing pid ${child.pid}`);
         killGroup(child, 'SIGTERM');
-        setTimeout(() => killGroup(child, 'SIGKILL'), SHUTDOWN_GRACE_MS).unref();
+        setTimeout(() => killGroup(child, 'SIGKILL'), DEFAULTS.shutdownGrace).unref();
       }
     });
-
-    ws.on('error', (err) => {
-      dbg('ws error:', err.message);
-    });
+    ws.on('error', e => dbg('ws error:', e.message));
   });
 
-  // Return a promise that resolves when the server is listening
   return new Promise((resolve, reject) => {
     httpServer.on('error', reject);
     httpServer.listen(0, HOST, () => {
       const port = httpServer.address().port;
       fs.writeFileSync(portFile, String(port) + '\n');
       log(`[hostbridge] ${PLATFORM} listening on ws://${HOST}:${port} (written to ${portFile})`);
-      endStartup();
+      seal();
 
-      const shutdown = () => new Promise((res) => {
+      const shutdown = () => new Promise(res => {
         log('[hostbridge] shutting down');
         closeLog();
-        for (const child of children) killGroup(child, 'SIGTERM');
+        for (const c of children) killGroup(c, 'SIGTERM');
         setTimeout(() => {
-          for (const child of children) killGroup(child, 'SIGKILL');
+          for (const c of children) killGroup(c, 'SIGKILL');
           wss.close();
-          httpServer.close(() => {
-            try { fs.unlinkSync(portFile); } catch {}
-            res();
-          });
-        }, SHUTDOWN_GRACE_MS).unref();
+          httpServer.close(() => { try { fs.unlinkSync(portFile); } catch {} res(); });
+        }, DEFAULTS.shutdownGrace).unref();
       });
-
       resolve({ port, portFile, shutdown });
     });
   });
@@ -424,25 +387,21 @@ function start(opts = {}) {
 
 module.exports = { start };
 
-// ---------- standalone mode ----------
-
 if (require.main === module) {
-  const args = process.argv.slice(2);
-  const opts = {};
+  const args = process.argv.slice(2), opts = {};
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--log-file' && args[i + 1]) { opts.logFile = args[++i]; }
-    else if (args[i] === '--port-file' && args[i + 1]) { opts.portFile = args[++i]; }
-    else if (args[i] === '--help' || args[i] === '-h') {
-      console.log('Usage: hostbridge.js [--log-file PATH] [--port-file PATH]');
+    if (args[i] === '--log-file'    && args[i+1]) opts.logFile    = args[++i];
+    else if (args[i] === '--port-file'   && args[i+1]) opts.portFile   = args[++i];
+    else if (args[i] === '--config-file' && args[i+1]) opts.configFile = args[++i];
+    else if (args[i] === '--state-file'  && args[i+1]) opts.stateFile  = args[++i];
+    else if (args[i] === '-h' || args[i] === '--help') {
+      console.log('Usage: hostbridge.js [--log-file PATH] [--port-file PATH] [--config-file PATH] [--state-file PATH]');
       process.exit(0);
     }
   }
   start(opts).then(({ shutdown }) => {
     const exit = () => shutdown().then(() => process.exit(0));
     process.on('SIGTERM', exit);
-    process.on('SIGINT',  exit);
-  }).catch((err) => {
-    console.error(`[hostbridge] ${err.message}`);
-    process.exit(1);
-  });
+    process.on('SIGINT', exit);
+  }).catch(e => { console.error(`[hostbridge] ${e.message}`); process.exit(1); });
 }

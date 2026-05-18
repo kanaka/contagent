@@ -56,14 +56,34 @@ All messages are JSON text frames over WebSocket.
 
 | Message | Fields | Description |
 |---------|--------|-------------|
+| `pending` | `message` | Command requires host approval; waiting for user. |
 | `started` | — | Process spawned successfully. |
 | `stdout` | `data` (base64) | Chunk of stdout output. |
 | `stderr` | `data` (base64) | Chunk of stderr output. |
 | `exit` | `code` | Process exited. Connection closes after this. |
-| `error` | `message` | Pre-spawn error (bad command, validation, etc.). |
+| `error` | `message` | Pre-spawn error (bad command, validation, denied, etc.). |
 
 All `data` fields are base64-encoded to handle binary content (audio, images,
 clipboard data).
+
+### Example: prompted command (xdg-open)
+
+```
+Client                              Server
+  │                                   │
+  ├─ {type:"exec",                    │
+  │   cmd:"xdg-open",                 │
+  │   args:["https://..."]}          ─►│ access check → prompt
+  │                                   │
+  │◄── {type:"pending",                │ show Glimpse dialog
+  │     message:"Waiting for..."}      │
+  │                                   │
+  │    ... user clicks Allow ...       │
+  │                                   │
+  │◄── {type:"started"}               │ spawn open https://...
+  │                                   │
+  │◄── {type:"exit", code:0}          │
+```
 
 ### Example: fire-and-forget (paplay)
 
@@ -253,6 +273,8 @@ the hostbridge shim.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `HOSTBRIDGE_PORT_FILE` | `.hostbridge-port` | Path to write the listening port |
+| `HOSTBRIDGE_CONFIG_FILE` | *(none)* | YAML config with `hostbridge` key |
+| `HOSTBRIDGE_STATE_FILE` | `.hostbridge-state.yaml` | Persistent access state |
 | `HOSTBRIDGE_DEBUG` | `0` | Set to `1` for debug logging |
 
 ### Shim (container)
@@ -280,17 +302,142 @@ HOSTBRIDGE_DEBUG=1 paplay file.mp3
 The server logs each command execution, signal, and lifecycle event. The shim
 logs connection state and message flow.
 
+## Access Control
+
+Commands are classified into three access levels:
+
+| Level | Behavior |
+|-------|----------|
+| `allow` | Run immediately, no prompt |
+| `deny` | Reject immediately |
+| `prompt` | Show a native Glimpse dialog on the host asking the user |
+
+### Config: `hostbridge.rules` in YAML config
+
+Access rules live under `hostbridge.rules` in the YAML config file
+(passed via `--config-file`). Rules use the same format as the state file.
+Commands not matched default to `prompt`.
+
+```yaml
+hostbridge:
+  rules:
+    - cmd: notify-send
+      access: allow
+      args: any
+      scope: always
+    - cmd: paplay
+      access: allow
+      args: any
+      scope: always
+    - cmd: xdg-open
+      access: prompt
+      args: any
+      scope: always
+```
+
+The config is **re-read on every command invocation**, so changes take effect
+immediately without restarting hostbridge.
+
+Config rules support the same arg-specific matching as state rules — you can
+allow specific URLs while prompting for others.
+
+Aliases (e.g., `aplay` → `paplay`) are not resolved in config rules; list
+each command name you want to match.
+
+### State file: `.hostbridge-state.yaml`
+
+Re-read on every access check. Stores user decisions from the prompt dialog.
+
+```yaml
+# Hostbridge access decisions
+# Edit or delete entries to change behavior
+# Session entries (with pid) expire when their hostbridge process exits
+
+rules:
+  # Always allow paplay with any arguments
+  - cmd: paplay
+    access: allow
+    args: any
+    scope: always
+
+  # Allow this specific URL always
+  - cmd: xdg-open
+    access: allow
+    args:
+      - "https://docs.example.com"
+    scope: always
+
+  # Deny pbcopy for this session only
+  - cmd: pbcopy
+    access: deny
+    args: any
+    scope: session
+    pid: 12345
+```
+
+Each rule has:
+
+| Field | Values | Description |
+|-------|--------|-------------|
+| `cmd` | command name | The invoked command |
+| `access` | `allow` / `deny` | Whether to permit the command |
+| `args` | `any` or `[...]` | Match any args, or only this specific arg list |
+| `scope` | `always` / `session` | `always` persists across restarts; `session` expires with the PID |
+| `pid` | number | Only for `session` scope: the hostbridge PID |
+
+Specific-args rules take priority over any-args rules for the same command.
+
+At startup, stale session entries (from dead PIDs) are automatically cleaned
+up. Delete the file to reset all decisions.
+
+### Resolution order
+
+1. Re-read config rules (`hostbridge.rules` from the config file)
+2. Find matching rule (specific args first, then any-args)
+3. If config match says `allow` or `deny` → immediate answer
+4. Otherwise (`prompt` or no match → default `prompt`):
+   a. Re-read `.hostbridge-state.yaml`
+   b. Find matching rule (specific args first, then any-args)
+   c. If found → use it
+   d. Otherwise → show interactive prompt dialog
+
+### Prompt dialog
+
+When a command requires approval, a native Glimpse dialog appears on the host
+showing the command and arguments with three dropdowns:
+
+| Dropdown | Options | Description |
+|----------|---------|-------------|
+| **Action** | Allow, Deny | Permit or reject |
+| **Scope** | Once, This Session, Always | How long the decision lasts |
+| **Args** | Only These Args, Any Args | Match this specific invocation or any |
+
+Keyboard: Enter = Confirm, Escape = Cancel (deny once).
+
+| Scope | Behavior |
+|-------|----------|
+| Once | No state saved. Applies to this invocation only. |
+| This Session | Saved to state file with the hostbridge PID. Expires on restart. |
+| Always | Saved to state file permanently. Survives restarts. |
+
+If Glimpse is not available and a command requires prompting, it is denied.
+
+While waiting for the user, the client receives a `pending` message so it can
+show a status indicator.
+
 ## Security
 
 The hostbridge is a deliberate escape hatch from the container sandbox.
 Security is enforced by:
 
 1. **Command opt-in list** — only registered commands can be executed
-2. **Argument validation** — each command's `transform` function sanitizes
+2. **Access control** — commands can be auto-allowed, auto-denied, or
+   prompted via native dialog
+3. **Argument validation** — each command's `transform` function sanitizes
    inputs (stripping flags, validating URLs, blocking clipboard reads)
-3. **Localhost only** — the server binds to `127.0.0.1`
-4. **Process isolation** — each command runs in its own process group;
+4. **Localhost only** — the server binds to `127.0.0.1`
+5. **Process isolation** — each command runs in its own process group;
    disconnect kills it
-5. **Timeouts** — commands are killed after a configurable timeout (default
+6. **Timeouts** — commands are killed after a configurable timeout (default
    60s, configurable per command, disabled for interactive commands like
    Glimpse)

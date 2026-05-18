@@ -336,8 +336,10 @@ def main() -> None:
         args += ["--env", f"CONTAGENT_EXTRA_GROUP_SPECS={group_specs}"]
     # Start hostbridge in the background
     script_dir = Path(__file__).resolve().parent
+    config_file = config_path(sys.argv[1:])
     hostbridge_proc = subprocess.Popen(
-        [str(script_dir / "hostbridge.js"), "--log-file", ".hostbridge-log"],
+        [str(script_dir / "hostbridge.js"), "--log-file", ".hostbridge-log",
+         "--config-file", str(config_file)],
     )
 
     def cleanup_hostbridge():

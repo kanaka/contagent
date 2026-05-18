@@ -269,7 +269,8 @@ function main() {
 
   // Start hostbridge, run docker, then shut down hostbridge
   const hostbridge = require("./hostbridge.js");
-  hostbridge.start({ logFile: ".hostbridge-log" }).then(({ port, portFile, shutdown }) => {
+  const cfgFile = configPath(process.argv.slice(2));
+  hostbridge.start({ logFile: ".hostbridge-log", configFile: cfgFile }).then(({ port, portFile, shutdown }) => {
     // Pass the hostbridge port to the container
     args.push("--env", `HOSTBRIDGE_PORT=${port}`);
 

@@ -315,7 +315,7 @@ cleanup_hostbridge() {
 }
 trap cleanup_hostbridge EXIT
 
-"$SCRIPT_DIR/hostbridge.js" --log-file .hostbridge-log &
+"$SCRIPT_DIR/hostbridge.js" --log-file .hostbridge-log --config-file "$CONTAGENT_CONFIG" &
 HOSTBRIDGE_PID=$!
 
 # Wait for port file to appear
