@@ -110,6 +110,7 @@ if [ ! -s "$CONTAGENT_CONFIG" ]; then
   embedded_config >"$tmp_config" || die "failed to extract default contagent config"
   [ -s "$tmp_config" ] || die "embedded default contagent config is empty"
   mv "$tmp_config" "$CONTAGENT_CONFIG"
+  warn "created $CONTAGENT_CONFIG from $CONTAGENT_IMAGE defaults"
 fi
 config_dir=$(cd "$(dirname "$CONTAGENT_CONFIG")" && pwd)
 config_json=$(yq_json "$CONTAGENT_CONFIG") || die "failed to parse $CONTAGENT_CONFIG"

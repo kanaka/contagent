@@ -78,6 +78,7 @@ function loadConfig(file, image) {
     const data = embeddedConfig(image);
     if (!data) die("embedded default contagent config is empty");
     fs.writeFileSync(file, data);
+    warn(`created ${file} from ${image} defaults`);
   }
   const config = yqJson(file, image);
   const tmp = path.join(os.tmpdir(), `contagent-embedded-${process.pid}.yaml`);

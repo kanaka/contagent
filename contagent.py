@@ -118,6 +118,7 @@ def load_config(path: Path, image: str) -> tuple[dict, Path]:
         if not data:
             die("embedded default contagent config is empty")
         path.write_text(data)
+        warn(f"created {path} from {image} defaults")
 
     config = yq_json(path, image)
     with tempfile.NamedTemporaryFile("w+", delete=False) as f:
