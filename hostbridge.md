@@ -8,23 +8,23 @@ It has two parts:
 
 - **hostbridge.js** — runs on the host, listens for WebSocket
   connections, spawns opt-in listed commands
-- **hostshim.js** — runs inside the container, symlinked as tool names
+- **hostbridge-client.js** — runs inside the container, symlinked as tool names
   (`paplay`, `pbcopy`, `glimpse`, etc.), connects to the server
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────┐
-│  Container                              │
-│                                         │
-│  agent / extension                      │
-│    └─ execFile("paplay", ["f.mp3"])     │
-│         └─ /usr/local/bin/paplay        │
-│            (symlink → hostshim.js)      │
-│            │                            │
-│            │  WebSocket                 │
-│            │  ws://host:PORT/           │
-└────────────┼────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│  Container                                  │
+│                                             │
+│  agent / extension                          │
+│    └─ execFile("paplay", ["f.mp3"])         │
+│         └─ /usr/local/bin/paplay            │
+│            (symlink → hostbridge-client.js) │
+│            │                                │
+│            │  WebSocket                     │
+│            │  ws://host:PORT/               │
+└────────────┼────────────────────────────────┘
              │
 ┌────────────┼────────────────────────────┐
 │  Host      │                            │
@@ -196,11 +196,11 @@ Add an entry to `REGISTRY` in `hostbridge.js`:
 },
 ```
 
-Then add a symlink in `Dockerfile-parts/hostshim`:
+Then add a symlink in `Dockerfile-parts/hostbridge`:
 
 ```dockerfile
 for t in ... my-tool; do \
-  ln -s hostshim.js /usr/local/bin/$t; \
+  ln -s hostbridge-client.js /usr/local/bin/$t; \
 done
 ```
 
@@ -227,7 +227,7 @@ port.
 
 ### Container
 
-The container image includes `hostshim.js` symlinked as each tool name.
+The container image includes `hostbridge-client.js` symlinked as each tool name.
 No container-side setup is needed beyond building the image.
 
 For Glimpse support, set `GLIMPSE_BINARY_PATH=/usr/local/bin/glimpse` in the

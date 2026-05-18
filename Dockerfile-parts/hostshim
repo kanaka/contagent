@@ -1,7 +1,0 @@
-
-COPY hostshim.js /usr/local/bin/hostshim.js
-RUN chmod +x /usr/local/bin/hostshim.js && \
-    for t in paplay aplay play notify-send xdg-open pbcopy wl-copy xclip xsel say glimpse; do \
-      ln -s hostshim.js /usr/local/bin/$t; \
-    done
-ENV GLIMPSE_BINARY_PATH=/usr/local/bin/glimpse

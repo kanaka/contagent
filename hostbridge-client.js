@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * hostshim.js
+ * hostbridge-client.js
  *
  * Runs inside the container. Symlinked to Linux tool names the host should
  * service (paplay, aplay, pbcopy, glimpse, etc.).
@@ -26,7 +26,7 @@ const cmd = path.basename(process.argv[1]);
 const args = process.argv.slice(2);
 
 function dbg(...a) {
-  if (DEBUG) console.error(`[hostshim:${cmd}:dbg]`, ...a);
+  if (DEBUG) console.error(`[hostbridge-client:${cmd}:dbg]`, ...a);
 }
 
 // ---------- port resolution ----------
