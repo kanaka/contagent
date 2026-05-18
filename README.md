@@ -118,9 +118,63 @@ Runtime environment:
   - `-c, --config CONFIG` chooses the runtime config path (default: `.contagent.yaml`)
   - `--<feature>` / `--no-<feature>` enables or disables all volume mounts for a feature for this run
   - `--show-options` lists config-defined feature volume toggles
+  - `--hostbridge` starts the hostbridge server for host command access (see below)
   - `--extra-groups <gid[,gid]>` (appends to `CONTAGENT_EXTRA_GROUP_GIDS`)
 
 On first run, contagent writes the embedded default config to the chosen config path. Existing configs are left in place. If the config was not generated from the current image, contagent warns and continues.
+
+## Hostbridge
+
+Hostbridge lets code inside the container run a curated set of host commands —
+audio playback, notifications, clipboard, browser, and GUI dialogs — without
+giving the container direct host access. Start it with `--hostbridge`:
+
+```bash
+./contagent --hostbridge
+```
+
+This launches a WebSocket server on the host that the container connects to.
+Each command invocation (e.g. `paplay`, `pbcopy`, `xdg-open`, `glimpse`)
+creates one WebSocket connection whose lifetime matches the spawned process.
+
+Supported commands: `paplay`/`aplay` (audio), `say` (TTS), `notify-send`
+(notifications), `xdg-open` (URLs), `pbcopy`/`wl-copy` (clipboard), `glimpse`
+(native GUI dialogs).
+
+### Access control
+
+Every command must be explicitly allowed or goes through an interactive prompt.
+Access rules live in the `hostbridge.rules` key of `.contagent.yaml`:
+
+```yaml
+hostbridge:
+  rules:
+    - cmd: notify-send
+      access: allow
+      args: any
+      scope: always
+    - cmd: paplay
+      access: allow
+      args: any
+      scope: always
+```
+
+Commands not listed default to `prompt`. When a command is prompted, a native
+[Glimpse](https://github.com/HazAT/glimpse) dialog appears on the host with
+three choices:
+
+- **Action**: Allow or Deny
+- **Scope**: Once, This Session (lost on restart), or Always (persisted)
+- **Args**: Only These Args (exact match) or Any Args
+
+Decisions are stored in `.hostbridge-state.yaml`. Session decisions are tagged
+with the hostbridge PID and expire automatically. Delete the file to reset.
+
+If Glimpse is unavailable (headless host), prompted commands are denied with a
+YAML snippet you can paste into your config to allow them permanently.
+
+See [hostbridge.md](hostbridge.md) for the full protocol, registry, and
+configuration reference.
 
 Examples:
 
