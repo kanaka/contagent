@@ -20,6 +20,7 @@ Options:
   --<feature>                 Enable volume mounts for an image feature
   --no-<feature>              Disable volume mounts for an image feature
   --show-options              Show config-defined --<feature>/--no-<feature> toggles and exit
+  --hostbridge                Start the hostbridge server for host command access
   --extra-groups <gid[,gid]>  Append supplementary group GIDs for this run
   -h, --help                  Show this help
 """
@@ -207,6 +208,8 @@ def parse_args(argv: list[str], model: dict) -> tuple[list[str], bool, bool, str
             return [], show_options, True, extra_groups, overrides
         if arg == "--show-options":
             show_options = True
+        elif arg == "--hostbridge":
+            overrides["__hostbridge"] = True
         elif arg in ("-c", "--config"):
             if i + 1 >= len(argv):
                 die(f"{arg} requires a value")
@@ -335,16 +338,26 @@ def main() -> None:
     group_specs = extra_group_specs(groups)
     if group_specs:
         args += ["--env", f"CONTAGENT_EXTRA_GROUP_SPECS={group_specs}"]
-    # Start hostbridge in the background
-    script_dir = Path(__file__).resolve().parent
-    config_file = config_path(sys.argv[1:])
-    hostbridge_proc = subprocess.Popen(
-        [str(script_dir / "hostbridge.js"), "--log-file", ".hostbridge-log",
-         "--config-file", str(config_file)],
-    )
+    hostbridge_proc = None
+    if overrides.pop("__hostbridge", False):
+        script_dir = Path(__file__).resolve().parent
+        config_file = config_path(sys.argv[1:])
+        hostbridge_proc = subprocess.Popen(
+            [str(script_dir / "hostbridge.js"), "--log-file", ".hostbridge-log",
+             "--config-file", str(config_file)],
+        )
+        port_file = os.environ.get("HOSTBRIDGE_PORT_FILE", ".hostbridge-port")
+        for _ in range(50):
+            if Path(port_file).exists() and Path(port_file).stat().st_size > 0:
+                break
+            time.sleep(0.1)
+        else:
+            hostbridge_proc.terminate()
+            die("hostbridge failed to start")
+        args += ["--env", f"HOSTBRIDGE_PORT={Path(port_file).read_text().strip()}"]
 
     def cleanup_hostbridge():
-        if hostbridge_proc.poll() is None:
+        if hostbridge_proc and hostbridge_proc.poll() is None:
             hostbridge_proc.terminate()
             try:
                 hostbridge_proc.wait(timeout=5)
@@ -353,20 +366,6 @@ def main() -> None:
 
     atexit.register(cleanup_hostbridge)
 
-    # Wait for port file
-    port_file = os.environ.get("HOSTBRIDGE_PORT_FILE", ".hostbridge-port")
-    for _ in range(50):
-        if Path(port_file).exists() and Path(port_file).stat().st_size > 0:
-            break
-        time.sleep(0.1)
-    else:
-        cleanup_hostbridge()
-        die("hostbridge failed to start")
-
-    hostbridge_port = Path(port_file).read_text().strip()
-    args += ["--env", f"HOSTBRIDGE_PORT={hostbridge_port}"]
-
-    # Forward signals to docker child
     docker_proc = subprocess.Popen(["docker", *args, image, *command])
 
     def forward_signal(signum, _frame):

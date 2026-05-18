@@ -11,6 +11,7 @@ Options:
   --<feature>                 Enable volume mounts for an image feature
   --no-<feature>              Disable volume mounts for an image feature
   --show-options              Show config-defined --<feature>/--no-<feature> toggles and exit
+  --hostbridge                Start the hostbridge server for host command access
   --extra-groups <gid[,gid]>  Append supplementary group GIDs for this run
   -h, --help                  Show this help
 `;
@@ -155,6 +156,7 @@ function parseArgs(argv, model) {
     if (arg === "--") { command = argv.slice(i + 1); break; }
     if (arg === "-h" || arg === "--help") { help = true; break; }
     if (arg === "--show-options") { show = true; continue; }
+    if (arg === "--hostbridge") { overrides.set('__hostbridge', true); continue; }
     if (arg === "-c" || arg === "--config") {
       if (i + 1 >= argv.length) die(`${arg} requires a value`);
       i += 1;
@@ -268,29 +270,28 @@ function main() {
   const groups = extraGroupSpecs(groupCsv);
   if (groups) args.push("--env", `CONTAGENT_EXTRA_GROUP_SPECS=${groups}`);
 
-  // Start hostbridge, run docker, then shut down hostbridge
-  const hostbridge = require("./hostbridge.js");
-  const cfgFile = configPath(process.argv.slice(2));
-  hostbridge.start({ logFile: ".hostbridge-log", configFile: cfgFile }).then(({ port, portFile, shutdown }) => {
-    // Pass the hostbridge port to the container
-    args.push("--env", `HOSTBRIDGE_PORT=${port}`);
+  const useHostbridge = parsed.overrides.get('__hostbridge');
+  parsed.overrides.delete('__hostbridge');
+  if (useHostbridge) {
+    const hostbridge = require("./hostbridge.js");
+    const cfgFile = configPath(process.argv.slice(2));
+    hostbridge.start({ logFile: ".hostbridge-log", configFile: cfgFile }).then(({ port, shutdown }) => {
+      args.push("--env", `HOSTBRIDGE_PORT=${port}`);
+      runDocker(args, image, parsed.command, shutdown);
+    }).catch((err) => die(err.message));
+  } else {
+    runDocker(args, image, parsed.command, null);
+  }
+}
 
-    const docker = cp.spawn("docker", [...args, image, ...parsed.command], { stdio: "inherit" });
-
-    const cleanup = (code) => {
-      shutdown().then(() => process.exit(typeof code === "number" ? code : 1));
-    };
-
-    docker.on("close", cleanup);
-    docker.on("error", (err) => { die(err.message); });
-
-    // Forward signals to docker and then clean up
-    for (const sig of ["SIGINT", "SIGTERM"]) {
-      process.on(sig, () => {
-        docker.kill(sig);
-      });
-    }
-  }).catch((err) => die(err.message));
+function runDocker(args, image, command, shutdown) {
+  const docker = cp.spawn("docker", [...args, image, ...command], { stdio: "inherit" });
+  docker.on("close", (code) => {
+    const exit = () => process.exit(typeof code === "number" ? code : 1);
+    shutdown ? shutdown().then(exit) : exit();
+  });
+  docker.on("error", (err) => die(err.message));
+  for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => docker.kill(sig));
 }
 
 main();

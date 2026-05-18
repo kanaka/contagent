@@ -11,6 +11,7 @@ Options:
   --<feature>                 Enable volume mounts for an image feature
   --no-<feature>              Disable volume mounts for an image feature
   --show-options              Show config-defined --<feature>/--no-<feature> toggles and exit
+  --hostbridge                Start the hostbridge server for host command access
   --extra-groups <gid[,gid]>  Append supplementary group GIDs for this run
   -h, --help                  Show this help
 EOF
@@ -176,6 +177,7 @@ done < <(jq -c '.features // [] | .[]' <<<"$config_json")
 mapfile -t option_order < <(printf '%s\n' "${option_order[@]}" | sort)
 show_options=0
 help_requested=0
+use_hostbridge=0
 extra_groups_csv=$CONTAGENT_EXTRA_GROUP_GIDS
 i=0
 while [ "$i" -lt "${#argv[@]}" ]; do
@@ -184,6 +186,7 @@ while [ "$i" -lt "${#argv[@]}" ]; do
     --) i=$((i + 1)); break ;;
     -h|--help) help_requested=1; break ;;
     --show-options) show_options=1; i=$((i + 1)) ;;
+    --hostbridge) use_hostbridge=1; i=$((i + 1)) ;;
     -c|--config)
       [ $((i + 1)) -lt "${#argv[@]}" ] || die "$arg requires a value"
       i=$((i + 2))
@@ -305,7 +308,6 @@ if [ "${#extra_group_gids[@]}" -gt 0 ]; then
   docker_args+=(--env "CONTAGENT_EXTRA_GROUP_SPECS=$(IFS=,; printf '%s' "${extra_group_specs[*]}")")
 fi
 
-# Start hostbridge in the background
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 HOSTBRIDGE_PID=
 cleanup_hostbridge() {
@@ -316,18 +318,17 @@ cleanup_hostbridge() {
 }
 trap cleanup_hostbridge EXIT
 
-"$SCRIPT_DIR/hostbridge.js" --log-file .hostbridge-log --config-file "$CONTAGENT_CONFIG" &
-HOSTBRIDGE_PID=$!
-
-# Wait for port file to appear
-PORT_FILE="${HOSTBRIDGE_PORT_FILE:-.hostbridge-port}"
-for _i in $(seq 1 50); do
-  [ -s "$PORT_FILE" ] && break
-  sleep 0.1
-done
-[ -s "$PORT_FILE" ] || die "hostbridge failed to start"
-HOSTBRIDGE_PORT=$(cat "$PORT_FILE")
-docker_args+=(--env "HOSTBRIDGE_PORT=$HOSTBRIDGE_PORT")
+if [ "$use_hostbridge" -eq 1 ]; then
+  "$SCRIPT_DIR/hostbridge.js" --log-file .hostbridge-log --config-file "$CONTAGENT_CONFIG" &
+  HOSTBRIDGE_PID=$!
+  PORT_FILE="${HOSTBRIDGE_PORT_FILE:-.hostbridge-port}"
+  for _i in $(seq 1 50); do
+    [ -s "$PORT_FILE" ] && break
+    sleep 0.1
+  done
+  [ -s "$PORT_FILE" ] || die "hostbridge failed to start"
+  docker_args+=(--env "HOSTBRIDGE_PORT=$(cat "$PORT_FILE")")
+fi
 
 docker run "${docker_args[@]}" "$CONTAGENT_IMAGE" "${command[@]}"
 exit_code=$?
