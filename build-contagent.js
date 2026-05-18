@@ -1,0 +1,140 @@
+#!/usr/bin/env node
+const { execFileSync } = require('child_process');
+const { createHash } = require('crypto');
+const { existsSync, readFileSync, writeFileSync } = require('fs');
+const { join } = require('path');
+const YAML = require('yaml');
+
+const USAGE = `Usage: ./build-contagent.js [--<feature> ...]
+
+Features, aliases, order, snippets, and version rules come from build-contagent.yaml.
+Default features come from CONTAGENT_FEATURES.
+`;
+
+function die(msg) { process.stderr.write(`ERROR: ${msg}\n`); process.exit(1); }
+
+function sh(cmd, args = [], opts = {}) {
+  try {
+    if (opts.capture === false) { execFileSync(cmd, args, { stdio: 'inherit', env: opts.env }); return ''; }
+    return execFileSync(cmd, args, { encoding: 'utf8', env: opts.env }).trim();
+  } catch (e) { die(`command failed: ${cmd} ${args.join(' ')}\n${(e.stderr || '').toString().trim()}`); }
+}
+
+function which(cmd) {
+  try { execFileSync('which', [cmd], { stdio: 'pipe' }); return true; } catch { return false; }
+}
+
+const escLabel = v => JSON.stringify(v).replace(/\$/g, '\\$');
+
+const argv = process.argv.slice(2);
+if (argv.includes('-h') || argv.includes('--help')) { process.stdout.write(USAGE); process.exit(0); }
+if (!which('docker')) die('docker is required');
+if (!which('gzip')) die('gzip is required');
+
+const { env } = process;
+const imageName = env.CONTAGENT_IMAGE_NAME || 'contagent';
+const root = __dirname;
+const manifestFile = join(root, 'build-contagent.yaml');
+if (!existsSync(manifestFile)) die(`missing manifest: ${manifestFile}`);
+
+const manifest = YAML.parse(readFileSync(manifestFile, 'utf8')) || {};
+const features = manifest.features || [];
+if (!features.length) die('manifest has no features');
+const schemaVersion = manifest.version ?? 2;
+
+const wanted = new Set(
+  [...(env.CONTAGENT_FEATURES || '').split(/\s+/), ...argv].filter(Boolean).map(t => t.replace(/^--/, ''))
+);
+const unknown = new Set(wanted);
+const dockerArgs = [], motd = [], labels = [], parts = [], runtimeFeatures = [];
+
+console.log('Building image with selected features:');
+for (const f of features) {
+  const label = String(f.name || ''), fpath = f.path || '';
+  if (!label || !fpath) die('invalid manifest row');
+  const names = [label, ...(f.aliases || []).map(String)];
+
+  for (const n of names) unknown.delete(n);
+  if (!f.required && !names.some(n => wanted.has(n))) continue;
+
+  for (const v of f.volumes || []) {
+    if (typeof v.path !== 'string' || !v.path)
+      die(`invalid volume entry in feature ${label}: path is required`);
+    if (v.source !== undefined && (typeof v.source !== 'string' || !v.source))
+      die(`invalid volume entry in feature ${label}: source is required`);
+    if (v.default !== undefined && typeof v.default !== 'boolean')
+      die(`invalid volume entry in feature ${label}: default must be boolean`);
+    for (const k of ['file', 'read_only'])
+      if (v[k] !== undefined && typeof v[k] !== 'boolean')
+        die(`invalid volume entry in feature ${label}: ${k} must be boolean`);
+  }
+
+  const rf = { name: label };
+  if (f.volumes?.length)
+    rf.volumes = f.volumes.map(v => {
+      const rv = { enabled: f.required ? true : v.default ?? true };
+      for (const k of ['path', 'source', 'file', 'read_only']) if (k in v) rv[k] = v[k];
+      return rv;
+    });
+  if (f.env != null && typeof f.env !== 'object') die(`invalid env entry in feature ${label}: env must be a map`);
+  if (f.env) rf.environment = f.env;
+  if (rf.volumes || rf.environment) runtimeFeatures.push(rf);
+
+  const partPath = join(root, fpath);
+  if (!existsSync(partPath)) die(`missing Dockerfile part: ${fpath}`);
+  parts.push(readFileSync(partPath, 'utf8'));
+
+  let value = 'builtin';
+  const ver = f.version;
+  if (ver && typeof ver === 'object') {
+    const envName = ver.env || '';
+    value = envName ? (env[envName] || ver.default || 'latest') : (ver.default || 'latest');
+    if (value === 'latest') {
+      if (!ver.resolve) die(`${label} requested latest but has no resolve command`);
+      value = sh('sh', ['-lc', ver.resolve]);
+      if (!value || value === 'null') die(`failed to resolve latest for ${label}`);
+    }
+    if (envName) dockerArgs.push('--build-arg', `${envName}=${value}`);
+  }
+  if (value !== 'builtin') { motd.push(`${label} ${value}`); console.log(`  ${label}=${value}`); }
+  else console.log(`  ${label}`);
+
+  let mounts;
+  if (f.volumes?.length) {
+    const seen = new Set(), rows = [];
+    for (const v of f.volumes) {
+      const row = `${v.source || v.path}:${v.path}`;
+      if (!seen.has(row)) { rows.push(row); seen.add(row); }
+    }
+    mounts = rows.join(',');
+  } else mounts = (f.mounts || []).join(',');
+  labels.push(`io.contagent.component.${label}.version=${escLabel(String(value))}`);
+  labels.push(`io.contagent.component.${label}.mounts=${escLabel(mounts)}`);
+}
+
+if (unknown.size) die(`unknown feature(s): ${[...unknown].sort().join(',')}`);
+if (!parts.length) die('no features selected');
+
+const hostbridge = manifest.hostbridge || {};
+const configBody = { version: schemaVersion, features: runtimeFeatures, hostbridge };
+const configId = createHash('sha256').update(YAML.stringify(configBody)).digest('hex');
+writeFileSync(join(root, '.contagent-default.yaml.generated'),
+  YAML.stringify({ version: schemaVersion, 'image-hash': configId, features: runtimeFeatures, hostbridge }));
+
+let df = parts.join('\n') + '\nRUN mkdir -p /usr/local/share/contagent\n'
+  + 'COPY .contagent-default.yaml.generated /usr/local/share/contagent/contagent.yaml\n';
+if (labels.length) df += `LABEL ${labels.join(' ')}\n`;
+writeFileSync(join(root, '.Dockerfile.generated'), df);
+
+writeFileSync(join(root, '.contagent-motd.generated'),
+  'contagent tool versions:\n' + motd.map(x => `  - ${x}`).join('\n') + (motd.length ? '\n' : ''));
+
+const imageRef = `${imageName}:${sh(join(root, 'voom-like-version.sh'), [], { env: { ...env, REPO_ROOT_VOOM: '1' } })}`;
+const latestRef = `${imageName}:latest`;
+console.log('Producing tags:');
+console.log(`  ${imageRef}`);
+console.log(`  ${latestRef}`);
+sh('docker', ['build', ...dockerArgs, '-t', imageRef, '-f', join(root, '.Dockerfile.generated'), root], { capture: false });
+sh('docker', ['tag', imageRef, latestRef], { capture: false });
+console.log('Run with:');
+console.log(`  CONTAGENT_IMAGE=${imageRef} ./contagent.sh`);
