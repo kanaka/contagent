@@ -1,6 +1,13 @@
 
 COPY .contagent-motd.generated /etc/contagent-motd
 
+COPY hostbridge-client.js /usr/local/bin/hostbridge-client.js
+RUN chmod +x /usr/local/bin/hostbridge-client.js && \
+    for t in paplay aplay play notify-send xdg-open pbcopy wl-copy xclip xsel say glimpse; do \
+      ln -s hostbridge-client.js /usr/local/bin/$t; \
+    done
+ENV GLIMPSE_BINARY_PATH=/usr/local/bin/glimpse
+
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
