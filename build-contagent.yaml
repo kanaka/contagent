@@ -1,12 +1,5 @@
 version: 2
 
-hostbridge:
-  rules:
-    - cmd: notify-send
-      access: allow
-      args: any
-      scope: always
-
 features:
   - name: base
     path: Dockerfile-parts/base
@@ -71,8 +64,9 @@ features:
   - name: docker
     aliases: [all, all-tools]
     path: Dockerfile-parts/docker
+    default: false
     volumes:
-      - { path: /var/run/docker.sock, default: false, file: true }
+      - { path: /var/run/docker.sock, file: true }
     version:
       env: DOCKER_VERSION
       default: latest
@@ -91,8 +85,9 @@ features:
   - name: gh
     aliases: [github, github-cli, githubcli, all, all-tools]
     path: Dockerfile-parts/gh
+    default: false
     volumes:
-      - { path: ~/.config/gh, default: false }
+      - { path: ~/.config/gh }
     version:
       env: GH_VERSION
       default: latest
@@ -101,8 +96,9 @@ features:
   - name: aws
     aliases: [aws-cli, awscli, amazon, amazon-web-services, all, all-tools]
     path: Dockerfile-parts/aws
+    default: false
     volumes:
-      - { path: ~/.aws, default: false }
+      - { path: ~/.aws }
     version:
       env: AWS_CLI_VERSION
       default: latest
@@ -185,6 +181,7 @@ features:
   - name: hostbridge
     aliases: [all, all-tools]
     path: Dockerfile-parts/hostbridge
+    default: false
     version:
       default: latest
       resolve: ./voom-like-version.sh .

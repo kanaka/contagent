@@ -110,6 +110,36 @@ Build implementation notes:
 - Manifest parsing uses local `yq` when available, otherwise `mikefarah/yq` via Docker.
 - The generated image contains the default runtime config for the selected features.
 
+### Config files
+
+There are two config files with different roles:
+
+- **`build-contagent.yaml`** — build-time manifest checked into the repo.
+  Defines available features, their Dockerfile parts, version resolution,
+  volume mounts, and environment variables. Edited by the image maintainer.
+
+- **`.contagent.yaml`** — optional runtime overrides on the host, per project
+  directory. Only needs to contain features you want to change from the
+  embedded defaults. If it doesn't exist, embedded defaults are used as-is.
+
+The flow: `build-contagent.yaml` → (build) → embedded in image →
+merged at runtime with `.contagent.yaml` (if present) → merged with CLI flags.
+
+To customize:
+
+```bash
+# See current effective config
+./contagent --show-config
+
+# Enable hostbridge and disable docker, write to .contagent.yaml
+./contagent --update-config --hostbridge --no-docker
+```
+
+`--show-config` is read-only (prints to stdout, no feature flags).
+`--update-config` loads the existing config, applies flags, and writes back.
+When the image is rebuilt, new defaults flow through automatically — the
+config file only contains what you've changed.
+
 Runtime environment:
 
 - `CONTAGENT_IMAGE` (default: `contagent:latest`)
@@ -117,17 +147,21 @@ Runtime environment:
 - CLI options:
   - `-c, --config CONFIG` chooses the runtime config path (default: `.contagent.yaml`)
   - `--<feature>` / `--no-<feature>` enables or disables all volume mounts for a feature for this run
-  - `--show-options` lists config-defined feature volume toggles
-  - `--hostbridge` starts the hostbridge server for host command access (see below)
+  - `--show-config` prints effective config (merged defaults + overrides + flags) and exits
+  - `--hostbridge` / `--no-hostbridge` enables/disables hostbridge (like any other feature)
   - `--extra-groups <gid[,gid]>` (appends to `CONTAGENT_EXTRA_GROUP_GIDS`)
 
-On first run, contagent writes the embedded default config to the chosen config path. Existing configs are left in place. If the config was not generated from the current image, contagent warns and continues.
+If `.contagent.yaml` exists, it is loaded and merged with the embedded
+defaults. Per-feature keys (`enabled`, `volumes`, `environment`) replace
+the embedded values; features not mentioned use their defaults. CLI flags
+(`--feature` / `--no-feature`) override `enabled` on top of everything.
 
 ## Hostbridge
 
 Hostbridge lets code inside the container run a curated set of host commands —
 audio playback, notifications, clipboard, browser, and GUI dialogs — without
-giving the container direct host access. Start it with `--hostbridge`:
+giving the container direct host access. Enable it with `--hostbridge`
+(or set `enabled: true` for the hostbridge feature in `.contagent.yaml`):
 
 ```bash
 ./contagent --hostbridge
@@ -144,19 +178,18 @@ Supported commands: `paplay`/`aplay` (audio), `say` (TTS), `notify-send`
 ### Access control
 
 Every command must be explicitly allowed or goes through an interactive prompt.
-Access rules live in the `hostbridge.rules` key of `.contagent.yaml`:
+Access rules live in `.hostbridge.yaml`:
 
 ```yaml
-hostbridge:
-  rules:
-    - cmd: notify-send
-      access: allow
-      args: any
-      scope: always
-    - cmd: paplay
-      access: allow
-      args: any
-      scope: always
+rules:
+  - cmd: notify-send
+    access: allow
+    args: any
+    scope: always
+  - cmd: paplay
+    access: allow
+    args: any
+    scope: always
 ```
 
 Commands not listed default to `prompt`. When a command is prompted, a native
@@ -167,8 +200,14 @@ three choices:
 - **Scope**: Once, This Session (lost on restart), or Always (persisted)
 - **Args**: Only These Args (exact match) or Any Args
 
-Decisions are stored in `.hostbridge-state.yaml`. Session decisions are tagged
-with the hostbridge PID and expire automatically. Delete the file to reset.
+Decisions are stored back to `.hostbridge.yaml`. Session decisions are tagged
+with the hostbridge PID and expire automatically. Delete entries to reset.
+
+To see all available commands with their current access level:
+
+```bash
+./hostbridge.js --show-config
+```
 
 If Glimpse is unavailable (headless host), prompted commands are denied with a
 YAML snippet you can paste into your config to allow them permanently.

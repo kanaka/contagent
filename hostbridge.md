@@ -273,8 +273,7 @@ the hostbridge shim.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `HOSTBRIDGE_PORT_FILE` | `.hostbridge-port` | Path to write the listening port |
-| `HOSTBRIDGE_CONFIG_FILE` | *(none)* | YAML config with `hostbridge` key |
-| `HOSTBRIDGE_STATE_FILE` | `.hostbridge-state.yaml` | Persistent access state |
+| `HOSTBRIDGE_CONFIG_FILE` | `.hostbridge.yaml` | Access rules config |
 | `HOSTBRIDGE_DEBUG` | `0` | Set to `1` for debug logging |
 
 ### Shim (container)
@@ -312,10 +311,11 @@ Commands are classified into three access levels:
 | `deny` | Reject immediately |
 | `prompt` | Show a native Glimpse dialog on the host asking the user |
 
-### Config: `hostbridge.rules` in YAML config
+### Config: `.hostbridge.yaml`
 
-Access rules live under `hostbridge.rules` in the YAML config file
-(passed via `--config-file`). Rules use the same format as the state file.
+Access rules live in `.hostbridge.yaml` (override with `-c`/`--config`).
+This single file serves as both config and state — manually authored rules
+and prompt decisions coexist.
 Commands not matched default to `prompt`.
 
 ```yaml
@@ -344,9 +344,10 @@ allow specific URLs while prompting for others.
 Aliases (e.g., `aplay` → `paplay`) are not resolved in config rules; list
 each command name you want to match.
 
-### State file: `.hostbridge-state.yaml`
+### Rules format
 
-Re-read on every access check. Stores user decisions from the prompt dialog.
+Re-read on every access check. User decisions from the prompt dialog are
+saved back to the same file.
 
 ```yaml
 # Hostbridge access decisions
@@ -392,11 +393,11 @@ up. Delete the file to reset all decisions.
 
 ### Resolution order
 
-1. Re-read config rules (`hostbridge.rules` from the config file)
+1. Re-read `.hostbridge.yaml` rules
 2. Find matching rule (specific args first, then any-args)
 3. If config match says `allow` or `deny` → immediate answer
 4. Otherwise (`prompt` or no match → default `prompt`):
-   a. Re-read `.hostbridge-state.yaml`
+   a. Re-read `.hostbridge.yaml`
    b. Find matching rule (specific args first, then any-args)
    c. If found → use it
    d. Otherwise → show interactive prompt dialog

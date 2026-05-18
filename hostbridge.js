@@ -8,9 +8,9 @@
  * One WebSocket = one command. Connection lifetime = process lifetime.
  * stdin/stdout/stderr and signals flow as JSON messages.
  *
- * Access control: hostbridge.rules in YAML config (allow/deny/prompt).
+ * Access control via .hostbridge.yaml (allow/deny/prompt rules).
  * Prompted commands show a native Glimpse dialog on the host.
- * Decisions persist in .hostbridge-state.yaml (session or always scope).
+ * Decisions persist back to .hostbridge.yaml (session or always scope).
  *
  * Library: require('./hostbridge.js').start({ configFile, logFile, ... })
  * Standalone: ./hostbridge.js [--config-file PATH] [--log-file PATH] ...
@@ -30,7 +30,7 @@ const PLATFORM = process.platform;
 const DEBUG = process.env.HOSTBRIDGE_DEBUG === '1';
 const DEFAULTS = {
   portFile: '.hostbridge-port',
-  stateFile: '.hostbridge-state.yaml',
+  configFile: '.hostbridge.yaml',
   timeout: 60_000,
   shutdownGrace: 2_000,
 };
@@ -110,8 +110,9 @@ function readYamlRules(file, key) {
 function writeYamlRules(file, rules, log) {
   try {
     fs.writeFileSync(file,
-      '# Hostbridge access decisions — edit or delete entries to change behavior\n' +
-      '# Session entries (with pid) expire when their hostbridge process exits\n\n' +
+      '# Hostbridge access rules — edit or delete entries to change behavior\n' +
+      '# Session entries (with pid) expire when their hostbridge process exits\n' +
+      '# Commands not listed default to: prompt\n\n' +
       YAML.stringify({ rules }, { lineWidth: 0 }));
   } catch (err) { log(`[hostbridge] WARN: write ${file}: ${err.message}`); }
 }
@@ -157,20 +158,16 @@ function yamlHint(cmd, args) {
   const argsYaml = args.length
     ? JSON.stringify(args) + '  # or use "any" for any args'
     : 'any';
-  return `To allow permanently, add to hostbridge.rules in your config:\n` +
+  return `To allow permanently, add to .hostbridge.yaml:\n` +
     `  - cmd: ${cmd}\n    access: allow\n    args: ${argsYaml}\n    scope: always`;
 }
 
-function getAccessLevel(cmd, rawArgs, configFile, stateFile) {
-  // Config rules (allow/deny = immediate)
-  const cfgMatch = findMatchingRule(readYamlRules(configFile, 'hostbridge'), cmd, rawArgs);
-  if (cfgMatch === 'allow' || cfgMatch === 'deny') return cfgMatch;
-  // State rules (session + always decisions)
-  return findMatchingRule(readYamlRules(stateFile, null), cmd, rawArgs) || 'prompt';
+function getAccessLevel(cmd, rawArgs, configFile) {
+  return findMatchingRule(readYamlRules(configFile), cmd, rawArgs) || 'prompt';
 }
 
-function saveRule(stateFile, rule, log) {
-  const rules = readYamlRules(stateFile, null).filter(r => {
+function saveRule(cfgFile, rule, log) {
+  const rules = readYamlRules(cfgFile).filter(r => {
     if (r.cmd !== rule.cmd) return true;
     // Remove conflicting: same cmd + same args class
     if (rule.args === 'any' && r.args === 'any') return false;
@@ -179,11 +176,11 @@ function saveRule(stateFile, rule, log) {
     return true;
   });
   rules.push(rule);
-  writeYamlRules(stateFile, rules, log);
+  writeYamlRules(cfgFile, rules, log);
 }
 
-function cleanupStaleEntries(stateFile, log) {
-  const rules = readYamlRules(stateFile, null);
+function cleanupStaleEntries(cfgFile, log) {
+  const rules = readYamlRules(cfgFile);
   if (!rules.length) return;
   const live = rules.filter(r => {
     if (r.scope !== 'session') return true;
@@ -191,7 +188,7 @@ function cleanupStaleEntries(stateFile, log) {
   });
   if (live.length < rules.length) {
     log(`[hostbridge] cleaned ${rules.length - live.length} stale session entry(s)`);
-    writeYamlRules(stateFile, live, log);
+    writeYamlRules(cfgFile, live, log);
   }
 }
 
@@ -230,9 +227,8 @@ document.addEventListener('keydown',e=>{if(e.key==='Enter')S();if(e.key==='Escap
 // ---------- start ----------
 
 function start(opts = {}) {
-  const portFile  = opts.portFile  || process.env.HOSTBRIDGE_PORT_FILE  || DEFAULTS.portFile;
-  const configFile= opts.configFile|| process.env.HOSTBRIDGE_CONFIG_FILE|| null;
-  const stateFile = opts.stateFile || process.env.HOSTBRIDGE_STATE_FILE || DEFAULTS.stateFile;
+  const portFile   = opts.portFile   || process.env.HOSTBRIDGE_PORT_FILE   || DEFAULTS.portFile;
+  const configFile  = opts.configFile || process.env.HOSTBRIDGE_CONFIG_FILE || DEFAULTS.configFile;
   const { log, dbg, seal, close: closeLog } = createLogger(opts.logFile || null);
 
   // Resolve commands
@@ -251,9 +247,8 @@ function start(opts = {}) {
   if (glimpseBin) COMMANDS.glimpse = { exec: glimpseBin, transform: a => a, timeout: 0 };
   log(`[hostbridge] ${'glimpse'.padEnd(12)} -> ${glimpseBin || '(not found; npm install glimpseui)'}`);
 
-  log(`[hostbridge] access config: ${configFile || 'none (all commands → prompt)'}`);
-  log(`[hostbridge] access state:  ${stateFile}`);
-  cleanupStaleEntries(stateFile, log);
+  log(`[hostbridge] access config: ${configFile}`);
+  cleanupStaleEntries(configFile, log);
 
   const children = new Set();
   const httpServer = http.createServer((_req, res) => {
@@ -286,7 +281,7 @@ function start(opts = {}) {
         }
 
         // Access control
-        const level = getAccessLevel(cmd, rawArgs, configFile, stateFile);
+        const level = getAccessLevel(cmd, rawArgs, configFile);
         dbg('access:', cmd, '->', level);
 
         if (level === 'deny') {
@@ -317,7 +312,7 @@ function start(opts = {}) {
           if (scope !== 'once') {
             const rule = { cmd, access: action, args: argsChoice === 'any' ? 'any' : rawArgs, scope };
             if (scope === 'session') rule.pid = process.pid;
-            saveRule(stateFile, rule, log);
+            saveRule(configFile, rule, log);
           }
           log(`[hostbridge] ${cmd}: ${action} ${scope}`);
           if (action !== 'allow') return reject(`${cmd}: denied by user`);
@@ -400,15 +395,37 @@ module.exports = { start };
 
 if (require.main === module) {
   const args = process.argv.slice(2), opts = {};
+  let showConfig = false;
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--log-file'    && args[i+1]) opts.logFile    = args[++i];
-    else if (args[i] === '--port-file'   && args[i+1]) opts.portFile   = args[++i];
-    else if (args[i] === '--config-file' && args[i+1]) opts.configFile = args[++i];
-    else if (args[i] === '--state-file'  && args[i+1]) opts.stateFile  = args[++i];
+    if (args[i] === '--log-file'   && args[i+1]) opts.logFile   = args[++i];
+    else if (args[i] === '--port-file'  && args[i+1]) opts.portFile  = args[++i];
+    else if ((args[i] === '-c' || args[i] === '--config') && args[i+1]) opts.configFile = args[++i];
+    else if (args[i] === '--show-config') showConfig = true;
     else if (args[i] === '-h' || args[i] === '--help') {
-      console.log('Usage: hostbridge.js [--log-file PATH] [--port-file PATH] [--config-file PATH] [--state-file PATH]');
+      console.log('Usage: hostbridge.js [-c PATH] [--log-file PATH] [--port-file PATH] [--show-config]');
       process.exit(0);
     }
+  }
+  if (showConfig) {
+    // Print effective config: defaults for all resolved commands merged with existing config
+    const configFile = opts.configFile || process.env.HOSTBRIDGE_CONFIG_FILE || DEFAULTS.configFile;
+    const existing = readYamlRules(configFile);
+    const defaults = [];
+    for (const [name, platforms] of Object.entries(REGISTRY)) {
+      for (const [exec] of (platforms[PLATFORM] || [])) {
+        if (which(exec)) { defaults.push(name); break; }
+      }
+    }
+    if (resolveGlimpseBinary()) defaults.push('glimpse');
+    // Merge: default prompt for each command, then overlay existing rules
+    const existingCmds = new Set(existing.map(r => r.cmd + '|' + (Array.isArray(r.args) ? JSON.stringify(r.args) : r.args)));
+    const rules = [...existing];
+    for (const cmd of defaults) {
+      if (!existingCmds.has(cmd + '|any'))
+        rules.push({ cmd, access: 'prompt', args: 'any', scope: 'always' });
+    }
+    process.stdout.write(YAML.stringify({ rules }, { lineWidth: 0 }));
+    process.exit(0);
   }
   start(opts).then(({ shutdown }) => {
     const exit = () => shutdown().then(() => process.exit(0));

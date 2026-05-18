@@ -1,256 +1,171 @@
 #!/usr/bin/env node
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
 const cp = require("child_process");
+const YAML = require("yaml");
 
 const USAGE = `Usage: ./contagent [options] [--] [command ...]
 
 Options:
   -c, --config CONFIG         Runtime config path (default: .contagent.yaml)
-  --<feature>                 Enable volume mounts for an image feature
-  --no-<feature>              Disable volume mounts for an image feature
-  --show-options              Show config-defined --<feature>/--no-<feature> toggles and exit
-  --hostbridge                Start the hostbridge server for host command access
-  --extra-groups <gid[,gid]>  Append supplementary group GIDs for this run
+  --show-config               Print effective config and exit
+  --update-config             Apply feature flags and write config file
+  --<feature>                 Enable a feature
+  --no-<feature>              Disable a feature
+  --extra-groups <gid[,gid]>  Append supplementary group GIDs
   -h, --help                  Show this help
 `;
 
-const EMBEDDED_CONFIG = "/usr/local/share/contagent/contagent.yaml";
+const EMBEDDED = "/usr/local/share/contagent/contagent.yaml";
+const VERSION = 2;
 const die = (msg) => { console.error(`ERROR: ${msg}`); process.exit(1); };
 const warn = (msg) => console.error(`WARN: ${msg}`);
-const id = (flag) => cp.execFileSync("id", [flag], { encoding: "utf8" }).trim();
-const hasCmd = (cmd) => cp.spawnSync("sh", ["-lc", `command -v ${cmd}`], { stdio: "ignore" }).status === 0;
-const parseJson = (text, msg) => { try { return JSON.parse(text); } catch { die(msg); } };
+const id = (f) => cp.execFileSync("id", [f], { encoding: "utf8" }).trim();
 const isSocket = (p) => { try { return fs.statSync(p).isSocket(); } catch { return false; } };
-const resolvePath = (raw, home, base) => raw === "~" || raw.startsWith("~/")
-  ? home + raw.slice(1)
-  : (path.isAbsolute(raw) ? raw : path.join(base, raw));
-
-function boolValue(value, fallback, feature, field) {
-  if (value == null) return fallback;
-  if (typeof value !== "boolean") die(`invalid volume entry in feature ${feature}: ${field} must be boolean`);
-  return value;
-}
+const resolvePath = (raw, home, base) =>
+  raw === "~" || raw.startsWith("~/") ? home + raw.slice(1)
+  : path.isAbsolute(raw) ? raw : path.join(base, raw);
 
 function embeddedConfig(image) {
-  const proc = cp.spawnSync("docker", ["run", "--rm", "--entrypoint", "cat", image, EMBEDDED_CONFIG], { encoding: "utf8" });
-  if (proc.status !== 0) die(`failed to extract default contagent config from ${image}`);
-  return proc.stdout;
+  const r = cp.spawnSync("docker", ["run", "--rm", "--entrypoint", "cat", image, EMBEDDED], { encoding: "utf8" });
+  if (r.status !== 0) die(`failed to extract config from ${image}`);
+  const doc = YAML.parse(r.stdout);
+  if (!doc?.features?.length) die("embedded config is invalid");
+  return doc;
 }
 
-function yqJson(file, image) {
-  const attempts = hasCmd("yq")
-    ? [["yq", ["-o=json", ".", file], null], ["yq", [".", file], null]]
-    : [
-        ["docker", ["run", "--rm", "-i", "--entrypoint", "yq", image, "-o=json", ".", "-"], fs.readFileSync(file)],
-        ["docker", ["run", "--rm", "-i", "--entrypoint", "yq", image, ".", "-"], fs.readFileSync(file)],
-      ];
-  if (!hasCmd("yq")) warn(`yq not found; falling back to yq from ${image}`);
-  for (const [cmd, args, input] of attempts) {
-    const proc = cp.spawnSync(cmd, args, { input, encoding: "utf8" });
-    if (proc.status === 0) {
-      try { return JSON.parse(proc.stdout); } catch { /* try next form */ }
+function loadUserConfig(file) {
+  if (!fs.existsSync(file)) return null;
+  try {
+    const doc = YAML.parse(fs.readFileSync(file, "utf8"));
+    if (doc?.version && doc.version !== VERSION) die(`${file} version ${doc.version} != ${VERSION}`);
+    return doc;
+  } catch (e) { die(`failed to parse ${file}: ${e.message}`); }
+}
+
+function mergeConfig(embedded, user, flags) {
+  const overrides = new Map((user?.features || []).filter(f => f.name).map(f => [f.name, f]));
+  return embedded.features.map(ef => {
+    const mf = { ...ef };
+    const uf = overrides.get(ef.name);
+    if (uf) {
+      if ('enabled' in uf) mf.enabled = uf.enabled;
+      if ('volumes' in uf) mf.volumes = uf.volumes;
+      if ('environment' in uf) mf.environment = uf.environment;
     }
-  }
-  die(`failed to parse ${file}`);
+    if (flags.has(mf.name)) mf.enabled = flags.get(mf.name);
+    return mf;
+  });
 }
 
-function configPath(argv) {
-  let config = ".contagent.yaml";
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === "--") break;
-    if (arg === "-c" || arg === "--config") {
-      if (i + 1 >= argv.length) die(`${arg} requires a value`);
-      config = argv[++i];
-    } else if (arg.startsWith("--config=")) {
-      config = arg.split("=", 2)[1];
-    } else if (!arg.startsWith("-")) {
-      break;
-    }
-  }
-  return config;
-}
+// ---------- arg parsing (single pass) ----------
 
-function loadConfig(file, image) {
-  if (!fs.existsSync(file) || fs.statSync(file).size === 0) {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    const data = embeddedConfig(image);
-    if (!data) die("embedded default contagent config is empty");
-    fs.writeFileSync(file, data);
-    warn(`created ${file} from ${image} defaults`);
-  }
-  const config = yqJson(file, image);
-  const tmp = path.join(os.tmpdir(), `contagent-embedded-${process.pid}.yaml`);
-  fs.writeFileSync(tmp, embeddedConfig(image));
-  const embedded = yqJson(tmp, image);
-  fs.rmSync(tmp, { force: true });
-  const configId = config["image-hash"] || "";
-  const embeddedId = embedded["image-hash"] || "";
-  if (embeddedId && configId !== embeddedId) warn(`${file} was not generated from ${image}`);
-  return { config, base: path.resolve(path.dirname(file)) };
-}
-
-function buildModel(config) {
-  const allFeatures = new Set();
-  const options = new Map();
-  const rows = [];
-  const env = [];
-  for (const feature of Array.isArray(config?.features) ? config.features : []) {
-    const name = String(feature?.name || "");
-    const volumes = Array.isArray(feature?.volumes) ? feature.volumes : [];
-    if (!name) continue;
-    for (const [key, value] of Object.entries(feature.environment || {})) env.push([String(key), String(value)]);
-    if (!volumes.length) continue;
-    allFeatures.add(name);
-
-    const states = [];
-    for (const volume of volumes) {
-      const target = volume.path;
-      if (typeof target !== "string" || !target) die(`invalid volume entry in feature ${name}: path is required`);
-      const source = volume.source == null ? target : volume.source;
-      if (typeof source !== "string" || !source) die(`invalid volume entry in feature ${name}: source is required`);
-      const enabled = boolValue(volume.enabled, true, name, "enabled");
-      states.push(enabled);
-      rows.push({
-        feature: name,
-        enabled,
-        source,
-        target,
-        file: boolValue(volume.file, false, name, "file"),
-        readOnly: boolValue(volume.read_only, false, name, "read_only"),
-        create: source === "~" || source.startsWith("~/") || !path.isAbsolute(source),
-      });
-    }
-    options.set(name, states.some(Boolean) && !states.every(Boolean) ? "mixed" : (states.every(Boolean) ? "on" : "off"));
-  }
-  return { allFeatures, options, rows, env };
-}
-
-function printOptions(image, model) {
-  if (!model.options.size) return console.log(`Config for ${image} exposes no volume toggles.`);
-  console.log(`Config volume toggles for ${image}:`);
-  for (const name of [...model.options.keys()].sort()) {
-    console.log(`  --${name} / --no-${name} (default: ${model.options.get(name)}; features: ${name})`);
-  }
-}
-
-function setOverride(arg, name, state, model, overrides) {
-  if (model.options.has(name)) overrides.set(name, state);
-  else if (model.allFeatures.has(name)) {
-    die(`option ${state ? `--${name}` : `--no-${name}`} is known but not included in config (feature(s): ${name})`);
-  } else {
-    die(`unknown option: ${arg}`);
-  }
-}
-
-function parseArgs(argv, model) {
-  const overrides = new Map();
+function parseArgs(argv, featureNames) {
+  const flags = new Map();
   let extraGroups = process.env.CONTAGENT_EXTRA_GROUP_GIDS || "";
-  let show = false;
-  let help = false;
-  let command = [];
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === "--") { command = argv.slice(i + 1); break; }
-    if (arg === "-h" || arg === "--help") { help = true; break; }
-    if (arg === "--show-options") { show = true; continue; }
-    if (arg === "--hostbridge") { overrides.set('__hostbridge', true); continue; }
-    if (arg === "-c" || arg === "--config") {
-      if (i + 1 >= argv.length) die(`${arg} requires a value`);
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith("--config=")) continue;
-    if (arg === "--extra-groups" || arg.startsWith("--extra-groups=")) {
-      if (arg === "--extra-groups" && i + 1 >= argv.length) die("--extra-groups requires a value");
-      const value = arg === "--extra-groups" ? argv[++i] : arg.split("=", 2)[1];
-      extraGroups = extraGroups ? `${extraGroups},${value}` : value;
-      continue;
-    }
-    if (arg.startsWith("--no-")) {
-      if (arg.includes("=")) die(`unknown option: ${arg}`);
-      setOverride(arg, arg.slice(5), false, model, overrides);
-      continue;
-    }
-    if (arg.startsWith("--")) {
-      if (arg.includes("=")) die(`unknown option: ${arg}`);
-      setOverride(arg, arg.slice(2), true, model, overrides);
-      continue;
-    }
-    if (arg.startsWith("-")) die(`unknown option: ${arg}`);
-    command = argv.slice(i);
-    break;
+  let configFile = ".contagent.yaml", showConfig = false, updateConfig = false, help = false;
+  let command = [], i = 0;
+  while (i < argv.length) {
+    const a = argv[i++];
+    if (a === "--") { command = argv.slice(i); break; }
+    if (a === "-h" || a === "--help") { help = true; break; }
+    if (a === "--show-config") { showConfig = true; continue; }
+    if (a === "--update-config") { updateConfig = true; continue; }
+    if (a === "-c" || a === "--config") { configFile = argv[i++] || die("-c requires a value"); continue; }
+    if (a.startsWith("--config=")) { configFile = a.split("=", 2)[1]; continue; }
+    if (a === "--extra-groups") { const v = argv[i++] || die("--extra-groups requires a value"); extraGroups = extraGroups ? `${extraGroups},${v}` : v; continue; }
+    if (a.startsWith("--extra-groups=")) { const v = a.split("=", 2)[1]; extraGroups = extraGroups ? `${extraGroups},${v}` : v; continue; }
+    if (a.startsWith("--no-")) { const n = a.slice(5); if (!featureNames.has(n)) die(`unknown feature: ${n}`); flags.set(n, false); continue; }
+    if (a.startsWith("--")) { const n = a.slice(2); if (!featureNames.has(n)) die(`unknown option: ${a}`); flags.set(n, true); continue; }
+    if (a.startsWith("-")) die(`unknown option: ${a}`);
+    command = argv.slice(i - 1); break;
   }
-  return { command, show, help, extraGroups, overrides };
+  return { configFile, command, showConfig, updateConfig, help, extraGroups, flags };
 }
 
-function mountPlan(rows, overrides, home, base) {
-  const byTarget = new Map();
-  for (const row of rows) {
-    const enabled = overrides.has(row.feature) ? overrides.get(row.feature) : row.enabled;
-    if (!enabled) continue;
-    const source = resolvePath(row.source, home, base);
-    const target = resolvePath(row.target, home, base);
-    const candidates = byTarget.get(target) || [];
-    const candidate = { source, file: row.file, readOnly: row.readOnly, create: row.create };
-    if (!candidates.some((c) => JSON.stringify(c) === JSON.stringify(candidate))) candidates.push(candidate);
-    byTarget.set(target, candidates);
-  }
+// ---------- volumes ----------
 
-  const specs = [];
-  const gids = [];
-  for (const [target, candidates] of byTarget.entries()) {
-    let chosen = candidates.find((c) => fs.existsSync(c.source));
-    if (!chosen) {
-      chosen = candidates.find((c) => c.create);
-      if (!chosen) die(`no existing source found for target ${target} among ${candidates.length} candidates`);
-      if (chosen.file) {
-        fs.mkdirSync(path.dirname(chosen.source), { recursive: true });
-        fs.closeSync(fs.openSync(chosen.source, "a"));
+function mountPlan(features, home, base) {
+  const targets = new Map();
+  for (const f of features) {
+    if (!f.enabled || !f.volumes) continue;
+    for (const v of f.volumes) {
+      const src = resolvePath(v.source || v.path, home, base);
+      const tgt = resolvePath(v.path, home, base);
+      if (!targets.has(tgt)) targets.set(tgt, []);
+      const c = { src, file: !!v.file, ro: !!v.read_only, create: /^~/.test(v.source || v.path) || !path.isAbsolute(v.source || v.path) };
+      if (!targets.get(tgt).some(x => x.src === c.src)) targets.get(tgt).push(c);
+    }
+  }
+  const specs = [], gids = [];
+  for (const [tgt, cands] of targets) {
+    let c = cands.find(c => fs.existsSync(c.src));
+    if (!c) {
+      c = cands.find(c => c.create);
+      if (!c) die(`no source for mount ${tgt}`);
+      if (c.file) {
+        fs.mkdirSync(path.dirname(c.src), { recursive: true });
+        fs.closeSync(fs.openSync(c.src, "a"));
       } else {
-        fs.mkdirSync(chosen.source, { recursive: true });
+        fs.mkdirSync(c.src, { recursive: true });
       }
     }
-    try {
-      const st = fs.statSync(chosen.source);
-      const gid = String(st.gid);
-      if (st.isSocket() && !gids.includes(gid)) gids.push(gid);
-    } catch { /* ignore */ }
-    specs.push(`${chosen.source}:${target}${chosen.readOnly ? ":ro" : ""}`);
+    try { const st = fs.statSync(c.src); if (st.isSocket() && !gids.includes(String(st.gid))) gids.push(String(st.gid)); } catch {}
+    specs.push(`${c.src}:${tgt}${c.ro ? ":ro" : ""}`);
   }
   return { specs, gids };
 }
 
 function extraGroupSpecs(csv) {
   const gids = [];
-  for (const token of csv ? csv.split(",") : []) {
-    const gid = token.trim();
-    if (!gid) continue;
-    if (!/^\d+$/.test(gid)) warn(`ignoring non-numeric extra group gid: ${gid}`);
-    else if (!gids.includes(gid)) gids.push(gid);
+  for (const t of csv ? csv.split(",") : []) {
+    const g = t.trim();
+    if (!g) continue;
+    if (!/^\d+$/.test(g)) warn(`ignoring non-numeric gid: ${g}`);
+    else if (!gids.includes(g)) gids.push(g);
   }
-  return gids.map((gid) => `g${gid}:${gid}`).join(",");
+  return gids.map(g => `g${g}:${g}`).join(",");
 }
+
+// ---------- main ----------
 
 function main() {
   if (cp.spawnSync("docker", ["--version"], { stdio: "ignore" }).error) die("docker is required");
   const image = process.env.CONTAGENT_IMAGE || "contagent:latest";
   const home = process.env.HOME || die("HOME must be set");
   const cwd = process.cwd();
-  const { config, base } = loadConfig(configPath(process.argv.slice(2)), image);
-  const model = buildModel(config);
-  const parsed = parseArgs(process.argv.slice(2), model);
-  if (parsed.help || parsed.show) {
-    if (parsed.help) process.stdout.write(`${USAGE}\n`);
-    printOptions(image, model);
+
+  const embedded = embeddedConfig(image);
+  const featureNames = new Set(embedded.features.map(f => f.name));
+  const p = parseArgs(process.argv.slice(2), featureNames);
+  if (p.help) { process.stdout.write(USAGE + "\n"); return; }
+
+  const features = mergeConfig(embedded, loadUserConfig(p.configFile), p.flags);
+
+  if (p.showConfig) {
+    process.stdout.write(YAML.stringify({ version: VERSION, features }));
+    return;
+  }
+  if (p.updateConfig) {
+    if (!p.flags.size) die("--update-config requires feature flags");
+    const diff = features.filter(mf => {
+      const ef = embedded.features.find(f => f.name === mf.name);
+      return !ef || mf.enabled !== ef.enabled
+        || JSON.stringify(mf.volumes) !== JSON.stringify(ef.volumes)
+        || JSON.stringify(mf.environment) !== JSON.stringify(ef.environment);
+    });
+    fs.mkdirSync(path.dirname(p.configFile), { recursive: true });
+    fs.writeFileSync(p.configFile, YAML.stringify({ version: VERSION, features: diff }));
+    console.error(`wrote ${p.configFile}`);
     return;
   }
 
+  // Docker args
+  const base = path.resolve(path.dirname(p.configFile));
   const args = ["run", "--rm", "--workdir", cwd, "--volume", `${cwd}:${cwd}`];
   if (process.stdin.isTTY && process.stdout.isTTY) args.push("--interactive", "--tty");
-  const env = [
+
+  const envs = [
     ["CONTAGENT_USERNAME", process.env.USER || id("-un")],
     ["CONTAGENT_GROUPNAME", id("-gn")],
     ["CONTAGENT_UID", id("-u")],
@@ -258,40 +173,35 @@ function main() {
     ["CONTAGENT_HOME", home],
     ...(process.env.TERM ? [["TERM", process.env.TERM]] : []),
     ...(process.env.COLORTERM ? [["COLORTERM", process.env.COLORTERM]] : []),
-    ...model.env,
   ];
-  for (const [key, value] of env) if (key) args.push("--env", `${key}=${value}`);
-  const mounts = mountPlan(model.rows, parsed.overrides, home, base);
-  for (const spec of mounts.specs) args.push("--volume", spec);
-  const sshSock = process.env.SSH_AUTH_SOCK || "";
-  if (sshSock && isSocket(sshSock)) args.push("--volume", `${sshSock}:${sshSock}`, "--env", `SSH_AUTH_SOCK=${sshSock}`);
+  for (const f of features) for (const [k, v] of Object.entries(f.environment || {})) envs.push([k, String(v)]);
+  for (const [k, v] of envs) args.push("--env", `${k}=${v}`);
+
+  const { specs, gids } = mountPlan(features, home, base);
+  for (const s of specs) args.push("--volume", s);
+  const ssh = process.env.SSH_AUTH_SOCK || "";
+  if (ssh && isSocket(ssh)) args.push("--volume", `${ssh}:${ssh}`, "--env", `SSH_AUTH_SOCK=${ssh}`);
   else warn("SSH agent not available; SSH auth forwarding disabled");
-  const groupCsv = [parsed.extraGroups, ...mounts.gids].filter(Boolean).join(",");
-  const groups = extraGroupSpecs(groupCsv);
+  const groups = extraGroupSpecs([p.extraGroups, ...gids].filter(Boolean).join(","));
   if (groups) args.push("--env", `CONTAGENT_EXTRA_GROUP_SPECS=${groups}`);
 
-  const useHostbridge = parsed.overrides.get('__hostbridge');
-  parsed.overrides.delete('__hostbridge');
-  if (useHostbridge) {
-    const hostbridge = require("./hostbridge.js");
-    const cfgFile = configPath(process.argv.slice(2));
-    hostbridge.start({ logFile: ".hostbridge-log", configFile: cfgFile }).then(({ port, shutdown }) => {
+  const hb = features.find(f => f.name === "hostbridge")?.enabled;
+  if (hb) {
+    require("./hostbridge.js").start({ logFile: ".hostbridge-log" }).then(({ port, shutdown }) => {
       args.push("--env", `HOSTBRIDGE_PORT=${port}`);
-      runDocker(args, image, parsed.command, shutdown);
-    }).catch((err) => die(err.message));
-  } else {
-    runDocker(args, image, parsed.command, null);
-  }
+      run(args, image, p.command, shutdown);
+    }).catch(e => die(e.message));
+  } else run(args, image, p.command);
 }
 
-function runDocker(args, image, command, shutdown) {
+function run(args, image, command, shutdown) {
   const docker = cp.spawn("docker", [...args, image, ...command], { stdio: "inherit" });
-  docker.on("close", (code) => {
+  docker.on("close", code => {
     const exit = () => process.exit(typeof code === "number" ? code : 1);
     shutdown ? shutdown().then(exit) : exit();
   });
-  docker.on("error", (err) => die(err.message));
-  for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => docker.kill(sig));
+  docker.on("error", e => die(e.message));
+  for (const s of ["SIGINT", "SIGTERM"]) process.on(s, () => docker.kill(s));
 }
 
 main();
