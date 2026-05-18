@@ -5,7 +5,7 @@ const { existsSync, readFileSync, writeFileSync } = require('fs');
 const { join } = require('path');
 const YAML = require('yaml');
 
-const USAGE = `Usage: ./build-contagent.js [--<feature> ...]
+const USAGE = `Usage: ./build-contagent [--<feature> ...]
 
 Features, aliases, order, snippets, and version rules come from build-contagent.yaml.
 Default features come from CONTAGENT_FEATURES.
@@ -137,4 +137,4 @@ console.log(`  ${latestRef}`);
 sh('docker', ['build', ...dockerArgs, '-t', imageRef, '-f', join(root, '.Dockerfile.generated'), root], { capture: false });
 sh('docker', ['tag', imageRef, latestRef], { capture: false });
 console.log('Run with:');
-console.log(`  CONTAGENT_IMAGE=${imageRef} ./contagent.sh`);
+console.log(`  CONTAGENT_IMAGE=${imageRef} ./contagent`);

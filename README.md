@@ -24,34 +24,38 @@ keeping filesystem and credential exposure narrow and intentional.
 ## Requirements
 
 - Docker on host.
-- Bash 4+ for `contagent.sh` and `build-contagent.sh`.
-- `curl`, `jq`, and `gzip` on host for resolving `latest` feature versions.
-- `yq` on host for runtime config parsing, or contagent falls back to `yq` from the image.
+- node/npm for `contagent` and `build-contagent`.
+- `curl`, `jq`, and `gzip` for resolving `latest` feature versions.
 
 ## Quick start
+
+Install npm deps basic operation (yaml) and for hostbridge support (ws, glimpse):
+```bash
+npm install
+```
 
 Build container image with selected features/tools/agents:
 
 ```bash
-./build-contagent.sh --docker --gh --psql --pi --claude
+./build-contagent --docker --gh --psql --pi --claude
 ```
 
 Launch interactive shell in current project:
 
 ```bash
-./contagent.sh
+./contagent
 ```
 
 Run one-shot command:
 
 ```bash
-./contagent.sh pi --help
+./contagent pi --help
 ```
 
 Use a specific built tag:
 
 ```bash
-CONTAGENT_IMAGE=contagent:<tag> ./contagent.sh
+CONTAGENT_IMAGE=contagent:<tag> ./contagent
 ```
 
 ## Exec into a running container as mapped user
@@ -121,20 +125,20 @@ On first run, contagent writes the embedded default config to the chosen config 
 Examples:
 
 ```bash
-CONTAGENT_FEATURES="pi codex" PI_VERSION=0.56.0 ./build-contagent.sh
-./contagent.sh pi --version
+CONTAGENT_FEATURES="pi codex" PI_VERSION=0.56.0 ./build-contagent
+./contagent pi --version
 
-./build-contagent.sh --claude --opencode --copilot
-CONTAGENT_IMAGE=contagent:20260302_101530-gabc123 ./contagent.sh
+./build-contagent --claude --opencode --copilot
+CONTAGENT_IMAGE=contagent:20260302_101530-gabc123 ./contagent
 
-./contagent.sh --docker docker ps
+./contagent --docker docker ps
 
-./contagent.sh --gh gh auth status
+./contagent --gh gh auth status
 
-./contagent.sh --aws aws sts get-caller-identity
+./contagent --aws aws sts get-caller-identity
 
-CONTAGENT_EXTRA_GROUP_GIDS=970 ./contagent.sh
-./contagent.sh --extra-groups 970,971
+CONTAGENT_EXTRA_GROUP_GIDS=970 ./contagent
+./contagent --extra-groups 970,971
 ```
 
 ## Trust model and security boundaries

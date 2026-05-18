@@ -11,11 +11,10 @@ usage() {
 Usage: ./smoketest.sh [launcher]
 
 launcher:
-  Path to launcher to test (default: ./contagent.sh)
+  Path to launcher to test (default: ./contagent)
   Examples:
     ./smoketest.sh
-    ./smoketest.sh ./contagent.py
-    ./smoketest.sh ./contagent.js
+    ./smoketest.sh ./contagent
 EOF
 }
 
@@ -36,7 +35,7 @@ if [ "$#" -eq 1 ] && { [ "$1" = "-h" ] || [ "$1" = "--help" ]; }; then
   exit 0
 fi
 
-launcher_input=${1:-contagent.sh}
+launcher_input=${1:-contagent}
 if [[ "$launcher_input" = /* || "$launcher_input" == */* ]]; then
   launcher=$launcher_input
 else

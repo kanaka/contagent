@@ -4,7 +4,7 @@ const os = require("os");
 const path = require("path");
 const cp = require("child_process");
 
-const USAGE = `Usage: ./contagent.js [options] [--] [command ...]
+const USAGE = `Usage: ./contagent [options] [--] [command ...]
 
 Options:
   -c, --config CONFIG         Runtime config path (default: .contagent.yaml)

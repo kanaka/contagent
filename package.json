@@ -1,6 +1,6 @@
 {
   "private": true,
-  "description": "Host-side dependencies for contagent hostbridge",
+  "description": "Host-side dependencies for contagent and hostbridge",
   "dependencies": {
     "ws": "^8.18.0",
     "yaml": "^2.7.0",
