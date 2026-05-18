@@ -182,6 +182,13 @@ features:
       default: latest
       resolve: curl -fsSL "https://registry.npmjs.org/@github/copilot/latest" | jq -r .version
 
+  - name: hostbridge
+    aliases: [all, all-tools]
+    path: Dockerfile-parts/hostbridge
+    version:
+      default: latest
+      resolve: ./voom-like-version.sh .
+
   - name: runtime
     path: Dockerfile-parts/runtime
     required: true

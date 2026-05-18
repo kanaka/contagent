@@ -216,7 +216,7 @@ Add an entry to `REGISTRY` in `hostbridge.js`:
 },
 ```
 
-Then add a symlink in `Dockerfile-parts/runtime`:
+Then add a symlink in `Dockerfile-parts/hostbridge`:
 
 ```dockerfile
 for t in ... my-tool; do \
