@@ -69,6 +69,10 @@ function clipboardWrite(args) {
   return [];
 }
 
+function clipboardRead(args) {
+  return [];
+}
+
 // ---------- registry ----------
 
 const REGISTRY = {
@@ -86,9 +90,13 @@ const REGISTRY = {
     linux: [['wl-copy', clipboardWrite],
       ['xclip', a => ['-selection', 'clipboard', ...clipboardWrite(a)]],
       ['xsel', a => ['--clipboard', '--input', ...clipboardWrite(a)]]] },
+  pbpaste: { darwin: [['pbpaste', clipboardRead]],
+    linux: [['wl-paste', clipboardRead],
+      ['xclip', a => ['-selection', 'clipboard', '-o', ...clipboardRead(a)]],
+      ['xsel', a => ['--clipboard', '--output', ...clipboardRead(a)]]] },
 };
 
-const ALIASES = { aplay: 'paplay', play: 'paplay', 'wl-copy': 'pbcopy', xclip: 'pbcopy', xsel: 'pbcopy' };
+const ALIASES = { aplay: 'paplay', play: 'paplay', 'wl-copy': 'pbcopy', 'wl-paste': 'pbpaste', xclip: 'pbcopy', xsel: 'pbcopy' };
 
 // ---------- helpers ----------
 

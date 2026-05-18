@@ -181,6 +181,7 @@ validators/transformers.
 | `notify-send` | osascript, notify-send | Desktop notifications |
 | `xdg-open` | open, xdg-open | Open URLs in browser |
 | `pbcopy` / `wl-copy` / `xclip` / `xsel` | pbcopy, wl-copy, xclip, xsel | Clipboard write |
+| `pbpaste` / `wl-paste` | pbpaste, wl-paste, xclip, xsel | Clipboard read |
 | `glimpse` | glimpse (from glimpseui) | Native GUI dialogs/windows |
 
 ### Argument validation

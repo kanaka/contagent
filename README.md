@@ -172,7 +172,7 @@ Each command invocation (e.g. `paplay`, `pbcopy`, `xdg-open`, `glimpse`)
 creates one WebSocket connection whose lifetime matches the spawned process.
 
 Supported commands: `paplay`/`aplay` (audio), `say` (TTS), `notify-send`
-(notifications), `xdg-open` (URLs), `pbcopy`/`wl-copy` (clipboard), `glimpse`
+(notifications), `xdg-open` (URLs), `pbcopy`/`pbpaste` (clipboard), `glimpse`
 (native GUI dialogs).
 
 ### Access control
