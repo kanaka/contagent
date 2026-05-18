@@ -18,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 
 const HOST = process.env.HOSTBRIDGE_HOST || 'host.docker.internal';
-const PORT_FILE = process.env.HOSTBRIDGE_PORT_FILE || '.contagent-hostbridge-port';
+const PORT_FILE = process.env.HOSTBRIDGE_PORT_FILE || '.hostbridge-port';
 const CONNECT_TIMEOUT_MS = 10_000;
 const DEBUG = process.env.HOSTBRIDGE_DEBUG === '1';
 

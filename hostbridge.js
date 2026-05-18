@@ -30,7 +30,7 @@ try {
 }
 
 const HOST = '127.0.0.1';
-const PORT_FILE = process.env.HOSTBRIDGE_PORT_FILE || '.contagent-hostbridge-port';
+const PORT_FILE = process.env.HOSTBRIDGE_PORT_FILE || '.hostbridge-port';
 const DEFAULT_TIMEOUT_MS = 60_000;
 const SHUTDOWN_GRACE_MS = 2_000;
 const PLATFORM = process.platform;

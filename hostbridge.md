@@ -212,7 +212,7 @@ on the current platform using `command -v`.
 ### Host (macOS)
 
 ```bash
-cd /path/to/contagent
+cd /path/to/hostbridge
 
 # Install dependencies (ws + glimpseui)
 npm install
@@ -222,7 +222,7 @@ npm install
 ```
 
 The server picks a random ephemeral port and writes it to
-`.contagent-hostbridge-port`. The container reads this file to discover the
+`.hostbridge-port`. The container reads this file to discover the
 port.
 
 ### Container
@@ -252,7 +252,7 @@ the hostbridge shim.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `HOSTBRIDGE_PORT_FILE` | `.contagent-hostbridge-port` | Path to write the listening port |
+| `HOSTBRIDGE_PORT_FILE` | `.hostbridge-port` | Path to write the listening port |
 | `HOSTBRIDGE_DEBUG` | `0` | Set to `1` for debug logging |
 
 ### Shim (container)
@@ -261,7 +261,7 @@ the hostbridge shim.
 |----------|---------|-------------|
 | `HOSTBRIDGE_HOST` | `host.docker.internal` | Hostname of the bridge server |
 | `HOSTBRIDGE_PORT` | *(from port file)* | Override port (skips port file) |
-| `HOSTBRIDGE_PORT_FILE` | `.contagent-hostbridge-port` | Path to read the server port |
+| `HOSTBRIDGE_PORT_FILE` | `.hostbridge-port` | Path to read the server port |
 | `HOSTBRIDGE_DEBUG` | `0` | Set to `1` for debug logging |
 | `GLIMPSE_BINARY_PATH` | *(not set)* | Path to Glimpse shim for glimpseui wrapper |
 
