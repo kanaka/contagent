@@ -12,6 +12,7 @@ Options:
   --update-config             Apply feature flags and write config file
   --<feature>                 Enable a feature
   --no-<feature>              Disable a feature
+  --docker-args <args>        Extra docker run args (shell-quoted string, repeatable)
   --extra-groups <gid[,gid]>  Append supplementary group GIDs
   -h, --help                  Show this help
 `;
@@ -22,6 +23,22 @@ const die = (msg) => { console.error(`ERROR: ${msg}`); process.exit(1); };
 const warn = (msg) => console.error(`WARN: ${msg}`);
 const id = (f) => cp.execFileSync("id", [f], { encoding: "utf8" }).trim();
 const isSocket = (p) => { try { return fs.statSync(p).isSocket(); } catch { return false; } };
+function shellSplit(s) {
+  const args = [];
+  let cur = "", inSingle = false, inDouble = false, esc = false;
+  for (const ch of s) {
+    if (esc) { cur += ch; esc = false; }
+    else if (ch === "\\" && !inSingle) esc = true;
+    else if (ch === "'" && !inDouble) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle) inDouble = !inDouble;
+    else if (/\s/.test(ch) && !inSingle && !inDouble)
+      { if (cur) { args.push(cur); cur = ""; } }
+    else cur += ch;
+  }
+  if (cur) args.push(cur);
+  return args;
+}
+
 const resolvePath = (raw, home, base) =>
   raw === "~" || raw.startsWith("~/") ? home + raw.slice(1)
   : path.isAbsolute(raw) ? raw : path.join(base, raw);
@@ -63,6 +80,7 @@ function mergeConfig(embedded, user, flags) {
 
 function parseArgs(argv, featureNames) {
   const flags = new Map();
+  let dockerArgs = "";
   let extraGroups = process.env.CONTAGENT_EXTRA_GROUP_GIDS || "";
   let configFile = ".contagent.yaml", showConfig = false, updateConfig = false, help = false;
   let command = [], i = 0;
@@ -74,6 +92,8 @@ function parseArgs(argv, featureNames) {
     if (a === "--update-config") { updateConfig = true; continue; }
     if (a === "-c" || a === "--config") { configFile = argv[i++] || die("-c requires a value"); continue; }
     if (a.startsWith("--config=")) { configFile = a.split("=", 2)[1]; continue; }
+    if (a === "--docker-args") { dockerArgs += (dockerArgs ? " " : "") + (argv[i++] || die("--docker-args requires a value")); continue; }
+    if (a.startsWith("--docker-args=")) { const v = a.split("=", 2)[1]; dockerArgs += (dockerArgs ? " " : "") + v; continue; }
     if (a === "--extra-groups") { const v = argv[i++] || die("--extra-groups requires a value"); extraGroups = extraGroups ? `${extraGroups},${v}` : v; continue; }
     if (a.startsWith("--extra-groups=")) { const v = a.split("=", 2)[1]; extraGroups = extraGroups ? `${extraGroups},${v}` : v; continue; }
     if (a.startsWith("--no-")) { const n = a.slice(5); if (!featureNames.has(n)) die(`unknown feature: ${n}`); flags.set(n, false); continue; }
@@ -81,7 +101,7 @@ function parseArgs(argv, featureNames) {
     if (a.startsWith("-")) die(`unknown option: ${a}`);
     command = argv.slice(i - 1); break;
   }
-  return { configFile, command, showConfig, updateConfig, help, extraGroups, flags };
+  return { configFile, command, showConfig, updateConfig, help, extraGroups, flags, dockerArgs };
 }
 
 // ---------- volumes ----------
@@ -187,6 +207,7 @@ function main() {
   else warn("SSH agent not available; SSH auth forwarding disabled");
   const groups = extraGroupSpecs([p.extraGroups, ...gids].filter(Boolean).join(","));
   if (groups) args.push("--env", `CONTAGENT_EXTRA_GROUP_SPECS=${groups}`);
+  if (p.dockerArgs) args.push(...shellSplit(p.dockerArgs));
 
   const hb = features.find(f => f.name === "hostbridge")?.enabled;
   if (hb) {
