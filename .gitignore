@@ -11,6 +11,8 @@ node_modules/
 .contagent-motd.generated
 .contagent-default.yaml.generated
 .contagent.yaml*
+.hostbridge.yaml*
 .hostbridge-port
 .hostbridge-log
 .hostbridge-state.yaml
+.hostbridge-tmp/

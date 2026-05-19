@@ -184,6 +184,9 @@ features:
     default: false
     environment:
       BROWSER: /usr/local/bin/xdg-open
+      TMPDIR: ./.hostbridge-tmp/
+    volumes:
+      - { path: ./.hostbridge-tmp }
     version:
       default: latest
       resolve: ./voom-like-version.sh .
@@ -191,10 +194,10 @@ features:
   - name: runtime
     path: Dockerfile-parts/runtime
     required: true
-    version:
-      default: latest
-      resolve: ./voom-like-version.sh .
     volumes:
       - { path: ~/.contagent }
       - { path: ~/.local/state/contagent }
       - { path: /var/cache/contagent, source: ~/.cache/contagent }
+    version:
+      default: latest
+      resolve: ./voom-like-version.sh .
