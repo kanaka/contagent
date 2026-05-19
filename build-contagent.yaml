@@ -182,6 +182,8 @@ features:
     aliases: [all, all-tools]
     path: Dockerfile-parts/hostbridge
     default: false
+    environment:
+      BROWSER: /usr/local/bin/xdg-open
     version:
       default: latest
       resolve: ./voom-like-version.sh .
