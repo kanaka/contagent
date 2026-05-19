@@ -52,6 +52,7 @@ function mergeConfig(embedded, user, flags) {
       if ('enabled' in uf) mf.enabled = uf.enabled;
       if ('volumes' in uf) mf.volumes = uf.volumes;
       if ('environment' in uf) mf.environment = uf.environment;
+      if ('ports' in uf) mf.ports = uf.ports;
     }
     if (flags.has(mf.name)) mf.enabled = flags.get(mf.name);
     return mf;
@@ -152,7 +153,8 @@ function main() {
       const ef = embedded.features.find(f => f.name === mf.name);
       return !ef || mf.enabled !== ef.enabled
         || JSON.stringify(mf.volumes) !== JSON.stringify(ef.volumes)
-        || JSON.stringify(mf.environment) !== JSON.stringify(ef.environment);
+        || JSON.stringify(mf.environment) !== JSON.stringify(ef.environment)
+        || JSON.stringify(mf.ports) !== JSON.stringify(ef.ports);
     });
     fs.mkdirSync(path.dirname(p.configFile), { recursive: true });
     fs.writeFileSync(p.configFile, YAML.stringify({ version: VERSION, features: diff }));
@@ -175,6 +177,7 @@ function main() {
     ...(process.env.COLORTERM ? [["COLORTERM", process.env.COLORTERM]] : []),
   ];
   for (const f of features) for (const [k, v] of Object.entries(f.environment || {})) envs.push([k, String(v)]);
+  for (const f of features) if (f.enabled) for (const p of f.ports || []) args.push("--publish", String(p));
   for (const [k, v] of envs) args.push("--env", `${k}=${v}`);
 
   const { specs, gids } = mountPlan(features, home, base);

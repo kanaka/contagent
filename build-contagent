@@ -73,8 +73,10 @@ for (const f of features) {
       for (const k of ['path', 'source', 'file', 'read_only']) if (k in v) rv[k] = v[k];
       return rv;
     });
-  if (f.env != null && typeof f.env !== 'object') die(`invalid env entry in feature ${label}: env must be a map`);
-  if (f.env) rf.environment = f.env;
+  if (f.environment != null && typeof f.environment !== 'object') die(`invalid environment in feature ${label}: must be a map`);
+  if (f.environment) rf.environment = f.environment;
+  if (f.ports != null && !Array.isArray(f.ports)) die(`invalid ports in feature ${label}: must be a list`);
+  if (f.ports?.length) rf.ports = f.ports;
   runtimeFeatures.push(rf);
 
   const partPath = join(root, fpath);
