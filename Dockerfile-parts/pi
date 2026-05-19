@@ -1,5 +1,5 @@
 ARG PI_VERSION
 
 RUN npm install -g \
-    "@mariozechner/pi-coding-agent@${PI_VERSION}" \
+    "@earendil-works/pi-coding-agent@${PI_VERSION}" \
     && npm cache clean --force
