@@ -93,6 +93,24 @@ features:
       default: latest
       resolve: curl -fsSL "https://api.github.com/repos/cli/cli/releases/latest" | jq -r '.tag_name | ltrimstr("v")'
 
+  - name: ruby
+    aliases: [vagrant, all, all-tools]
+    path: Dockerfile-parts/ruby
+    version:
+      env: RUBY_VERSION
+      default: latest
+      resolve: curl -fsSL "https://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages.gz" | gzip -dc | awk '/^Package:[[:space:]]ruby$/{f=1} f&&/^Version:[[:space:]]/{v=$2;f=0} END{print v}'
+
+  - name: vagrant
+    aliases: [all, all-tools]
+    path: Dockerfile-parts/vagrant
+    volumes:
+      - { path: "~/.vagrant.d" }
+    version:
+      env: VAGRANT_VERSION
+      default: latest
+      resolve: curl -fsSL "https://checkpoint-api.hashicorp.com/v1/check/vagrant" | jq -r '.current_version'
+
   - name: aws
     aliases: [aws-cli, awscli, amazon, amazon-web-services, all, all-tools]
     path: Dockerfile-parts/aws

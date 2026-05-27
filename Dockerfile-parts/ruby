@@ -1,0 +1,9 @@
+ARG RUBY_VERSION=latest
+
+RUN apt-get update \
+    && if [ "$RUBY_VERSION" = latest ]; then \
+         apt-get install -y --no-install-recommends ruby ruby-dev build-essential libarchive-tools; \
+       else \
+         apt-get install -y --no-install-recommends "ruby=$RUBY_VERSION" ruby-dev build-essential libarchive-tools; \
+       fi \
+    && rm -rf /var/lib/apt/lists/*

@@ -1,0 +1,3 @@
+ARG VAGRANT_VERSION
+
+RUN gem install vagrant -v "${VAGRANT_VERSION}" --no-document
