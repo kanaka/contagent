@@ -12,8 +12,8 @@ Options:
   --update-config             Apply feature flags and write config file
   --<feature>                 Enable a feature
   --no-<feature>              Disable a feature
-  --docker-args <args>        Extra docker run args (shell-quoted string, repeatable)
-  --extra-groups <gid[,gid]>  Append supplementary group GIDs
+  --docker-args <args>        Extra docker run args (shell-quoted string)
+  --extra-groups <gid[,gid]>  Supplementary group GIDs
   -h, --help                  Show this help
 `;
 
@@ -80,9 +80,9 @@ function mergeConfig(embedded, user, flags) {
 
 function parseArgs(argv, featureNames) {
   const flags = new Map();
-  let dockerArgs = "";
-  let extraGroups = process.env.CONTAGENT_EXTRA_GROUP_GIDS || "";
-  let configFile = ".contagent.yaml", showConfig = false, updateConfig = false, help = false;
+  let dockerArgs = null;
+  let extraGroups = null;
+  let configFile = null, showConfig = false, updateConfig = false, help = false;
   let command = [], i = 0;
   while (i < argv.length) {
     const a = argv[i++];
@@ -92,15 +92,18 @@ function parseArgs(argv, featureNames) {
     if (a === "--update-config") { updateConfig = true; continue; }
     if (a === "-c" || a === "--config") { configFile = argv[i++] || die("-c requires a value"); continue; }
     if (a.startsWith("--config=")) { configFile = a.split("=", 2)[1]; continue; }
-    if (a === "--docker-args") { dockerArgs += (dockerArgs ? " " : "") + (argv[i++] || die("--docker-args requires a value")); continue; }
-    if (a.startsWith("--docker-args=")) { const v = a.split("=", 2)[1]; dockerArgs += (dockerArgs ? " " : "") + v; continue; }
-    if (a === "--extra-groups") { const v = argv[i++] || die("--extra-groups requires a value"); extraGroups = extraGroups ? `${extraGroups},${v}` : v; continue; }
-    if (a.startsWith("--extra-groups=")) { const v = a.split("=", 2)[1]; extraGroups = extraGroups ? `${extraGroups},${v}` : v; continue; }
+    if (a === "--docker-args") { dockerArgs = argv[i++] || die("--docker-args requires a value"); continue; }
+    if (a.startsWith("--docker-args=")) { dockerArgs = a.split("=", 2)[1]; continue; }
+    if (a === "--extra-groups") { extraGroups = argv[i++] || die("--extra-groups requires a value"); continue; }
+    if (a.startsWith("--extra-groups=")) { extraGroups = a.split("=", 2)[1]; continue; }
     if (a.startsWith("--no-")) { const n = a.slice(5); if (!featureNames.has(n)) die(`unknown feature: ${n}`); flags.set(n, false); continue; }
     if (a.startsWith("--")) { const n = a.slice(2); if (!featureNames.has(n)) die(`unknown option: ${a}`); flags.set(n, true); continue; }
     if (a.startsWith("-")) die(`unknown option: ${a}`);
     command = argv.slice(i - 1); break;
   }
+  configFile = configFile ?? process.env.CONTAGENT_CONFIG ?? ".contagent.yaml";
+  dockerArgs = dockerArgs ?? process.env.CONTAGENT_DOCKER_ARGS ?? "";
+  extraGroups = extraGroups ?? process.env.CONTAGENT_EXTRA_GROUP_GIDS ?? "";
   return { configFile, command, showConfig, updateConfig, help, extraGroups, flags, dockerArgs };
 }
 

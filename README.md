@@ -122,16 +122,18 @@ embedded defaults → .contagent.yaml (if present) → CLI flags
 
 ### Command-line flags
 
-- `-c CONFIG`, `--config CONFIG` — config file path (default: `.contagent.yaml`)
+- `-c CONFIG`, `--config CONFIG` — config file path; overrides `CONTAGENT_CONFIG`
 - `--show-config` — print the fully merged effective config and exit
 - `--update-config` — apply feature flags to the config file and write it back; requires at least one flag
 - `--<feature>` / `--no-<feature>` — enable or disable a feature for this run
-- `--extra-groups <gid[,gid]>` — add supplementary group GIDs; appends to `CONTAGENT_EXTRA_GROUP_GIDS`
-- `--docker-args <args>` — extra `docker run` arguments (shell-quoted string, repeatable)
+- `--extra-groups <gid[,gid]>` — supplementary group GIDs; overrides `CONTAGENT_EXTRA_GROUP_GIDS`
+- `--docker-args <args>` — extra `docker run` arguments (shell-quoted string); overrides `CONTAGENT_DOCKER_ARGS`
 
 Environment variables:
 
 - `CONTAGENT_IMAGE` — image to run (default: `contagent:latest`)
+- `CONTAGENT_CONFIG` — config file path (default: `.contagent.yaml`)
+- `CONTAGENT_DOCKER_ARGS` — extra `docker run` arguments (shell-quoted string)
 - `CONTAGENT_EXTRA_GROUP_GIDS` — comma-separated supplementary GIDs applied at container startup
 
 ### `.contagent.yaml`
