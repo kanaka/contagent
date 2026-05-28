@@ -110,51 +110,70 @@ Build implementation notes:
 - Manifest parsing uses local `yq` when available, otherwise `mikefarah/yq` via Docker.
 - The generated image contains the default runtime config for the selected features.
 
-### Config files
+## Runtime config
 
-There are two config files with different roles:
+Three layers are merged in order: the default config embedded in the image at
+build time, the optional per-project `.contagent.yaml` override file, and any
+CLI feature flags. Later layers win.
 
-- **`build-contagent.yaml`** — build-time manifest checked into the repo.
-  Defines available features, their Dockerfile parts, version resolution,
-  volume mounts, and environment variables. Edited by the image maintainer.
-
-- **`.contagent.yaml`** — optional runtime overrides on the host, per project
-  directory. Only needs to contain features you want to change from the
-  embedded defaults. If it doesn't exist, embedded defaults are used as-is.
-
-The flow: `build-contagent.yaml` → (build) → embedded in image →
-merged at runtime with `.contagent.yaml` (if present) → merged with CLI flags.
-
-To customize:
-
-```bash
-# See current effective config
-./contagent --show-config
-
-# Enable hostbridge and disable docker, write to .contagent.yaml
-./contagent --update-config --hostbridge --no-docker
+```
+embedded defaults → .contagent.yaml (if present) → CLI flags
 ```
 
-`--show-config` is read-only (prints to stdout, no feature flags).
-`--update-config` loads the existing config, applies flags, and writes back.
-When the image is rebuilt, new defaults flow through automatically — the
-config file only contains what you've changed.
+### Command-line flags
 
-Runtime environment:
+- `-c CONFIG`, `--config CONFIG` — config file path (default: `.contagent.yaml`)
+- `--show-config` — print the fully merged effective config and exit
+- `--update-config` — apply feature flags to the config file and write it back; requires at least one flag
+- `--<feature>` / `--no-<feature>` — enable or disable a feature for this run
+- `--extra-groups <gid[,gid]>` — add supplementary group GIDs; appends to `CONTAGENT_EXTRA_GROUP_GIDS`
+- `--docker-args <args>` — extra `docker run` arguments (shell-quoted string, repeatable)
 
-- `CONTAGENT_IMAGE` (default: `contagent:latest`)
-- `CONTAGENT_EXTRA_GROUP_GIDS` (non-empty comma-separated gid list applies supplementary groups; empty disables)
-- CLI options:
-  - `-c, --config CONFIG` chooses the runtime config path (default: `.contagent.yaml`)
-  - `--<feature>` / `--no-<feature>` enables or disables all volume mounts for a feature for this run
-  - `--show-config` prints effective config (merged defaults + overrides + flags) and exits
-  - `--hostbridge` / `--no-hostbridge` enables/disables hostbridge (like any other feature)
-  - `--extra-groups <gid[,gid]>` (appends to `CONTAGENT_EXTRA_GROUP_GIDS`)
+Environment variables:
 
-If `.contagent.yaml` exists, it is loaded and merged with the embedded
-defaults. Per-feature keys (`enabled`, `volumes`, `environment`) replace
-the embedded values; features not mentioned use their defaults. CLI flags
-(`--feature` / `--no-feature`) override `enabled` on top of everything.
+- `CONTAGENT_IMAGE` — image to run (default: `contagent:latest`)
+- `CONTAGENT_EXTRA_GROUP_GIDS` — comma-separated supplementary GIDs applied at container startup
+
+### `.contagent.yaml`
+
+Only include features you want to change from the embedded defaults; omitted
+features inherit their embedded values unchanged. `--update-config` writes
+only the diff from defaults, keeping the file minimal. When the image is
+rebuilt with new defaults, only your explicit overrides persist.
+
+```yaml
+version: 2
+
+features:
+  - name: docker            # must match a feature name in the embedded config
+    enabled: false          # overrides the feature's default enabled state
+
+  - name: claude
+    volumes:                # replaces the feature's entire embedded volume list
+      - path: ~/.claude     # container path and default host path; ~ expands to $HOME
+        source: ~/work/.claude  # host path when different from path
+        read_only: true     # mount read-only (default: false)
+        file: false         # true if the path is a file rather than a directory
+
+  - name: hostbridge
+    enabled: true
+    environment:            # env vars injected into the container; replaces the embedded map
+      BROWSER: /usr/local/bin/xdg-open
+    ports:                  # docker --publish entries; replaces the embedded list
+      - "7284:7284"
+```
+
+**Field reference:**
+
+- **`name`** *(required)* — must match a feature name in the embedded config.
+- **`enabled`** — `true`/`false`; overrides the feature default. CLI `--<feature>`/`--no-<feature>` overrides this further.
+- **`volumes`** — replaces the embedded volume list entirely when present.
+  - **`path`** *(required)* — container mount target and default host source. Relative paths resolve against the config file's directory; `~` expands to `$HOME`.
+  - **`source`** — host path when it differs from `path`.
+  - **`read_only`** — mount read-only (default: `false`).
+  - **`file`** — `true` if the path is a file; a zero-byte file is created if it doesn't exist (default: `false`).
+- **`environment`** — map of env vars injected when the feature is enabled; replaces the embedded map for that feature.
+- **`ports`** — list of `docker --publish` port specs; replaces the embedded list for that feature.
 
 ## Hostbridge
 
