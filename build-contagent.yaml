@@ -4,6 +4,8 @@ features:
   - name: base
     path: Dockerfile-parts/base
     required: true
+    environment:
+      LANG: "C.UTF-8"
 
   - name: build
     aliases: [build-tools, all, all-tools]
