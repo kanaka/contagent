@@ -40,8 +40,8 @@ function shellSplit(s) {
 }
 
 const resolvePath = (raw, home, base) =>
-  raw === "~" || raw.startsWith("~/") ? home + raw.slice(1)
-  : path.isAbsolute(raw) ? raw : path.join(base, raw);
+  raw === "~" || raw.startsWith("~/") ? path.resolve(home, raw.slice(2) || ".")
+  : path.resolve(base, raw);
 
 function embeddedConfig(image) {
   const r = cp.spawnSync("docker", ["run", "--rm", "--entrypoint", "cat", image, EMBEDDED], { encoding: "utf8" });
@@ -174,7 +174,7 @@ function main() {
     if (!p.flags.size) die("--update-config requires feature flags");
     const diff = features.filter(mf => {
       const ef = embedded.features.find(f => f.name === mf.name);
-      return !ef || mf.enabled !== ef.enabled
+      return p.flags.has(mf.name) || !ef || mf.enabled !== ef.enabled
         || JSON.stringify(mf.volumes) !== JSON.stringify(ef.volumes)
         || JSON.stringify(mf.environment) !== JSON.stringify(ef.environment)
         || JSON.stringify(mf.ports) !== JSON.stringify(ef.ports);
@@ -186,7 +186,6 @@ function main() {
   }
 
   // Docker args
-  const base = path.resolve(path.dirname(p.configFile));
   const args = ["run", "--rm", "--workdir", cwd, "--volume", `${cwd}:${cwd}`];
   if (process.stdin.isTTY && process.stdout.isTTY) args.push("--interactive", "--tty");
 
@@ -203,7 +202,7 @@ function main() {
   for (const f of features) if (f.enabled) for (const p of f.ports || []) args.push("--publish", String(p));
   for (const [k, v] of envs) args.push("--env", `${k}=${v}`);
 
-  const { specs, gids } = mountPlan(features, home, base);
+  const { specs, gids } = mountPlan(features, home, cwd);
   for (const s of specs) args.push("--volume", s);
   const ssh = process.env.SSH_AUTH_SOCK || "";
   if (ssh && isSocket(ssh)) args.push("--volume", `${ssh}:${ssh}`, "--env", `SSH_AUTH_SOCK=${ssh}`);
