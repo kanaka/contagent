@@ -166,6 +166,15 @@ features:
       default: latest
       resolve: curl -fsSL "https://registry.npmjs.org/agent-browser/latest" | jq -r .version
 
+  - name: playwright-browsers
+    aliases: [browsers, all, all-tools]
+    path: Dockerfile-parts/playwright-browsers
+    default: false
+    version:
+      env: PLAYWRIGHT_VERSION
+      default: latest
+      resolve: curl -fsSL "https://registry.npmjs.org/playwright/latest" | jq -r .version
+
   - name: uv
     aliases: [uvx, all, all-tools]
     path: Dockerfile-parts/uv
