@@ -42,6 +42,7 @@ function shellSplit(s) {
 const resolvePath = (raw, home, base) =>
   raw === "~" || raw.startsWith("~/") ? path.resolve(home, raw.slice(2) || ".")
   : path.resolve(base, raw);
+const expandEnvironment = (value, cwd) => String(value).replaceAll("${CONTAGENT_CWD}", cwd);
 
 function embeddedConfig(image) {
   const r = cp.spawnSync("docker", ["run", "--rm", "--entrypoint", "cat", image, EMBEDDED], { encoding: "utf8" });
@@ -195,10 +196,14 @@ function main() {
     ["CONTAGENT_UID", id("-u")],
     ["CONTAGENT_GID", id("-g")],
     ["CONTAGENT_HOME", home],
+    ["CONTAGENT_CWD", cwd],
     ...(process.env.TERM ? [["TERM", process.env.TERM]] : []),
     ...(process.env.COLORTERM ? [["COLORTERM", process.env.COLORTERM]] : []),
   ];
-  for (const f of features) if (f.enabled) for (const [k, v] of Object.entries(f.environment || {})) envs.push([k, String(v)]);
+  for (const f of features) if (f.enabled) for (const [k, v] of Object.entries(f.environment || {})) {
+    if (k === "CONTAGENT_CWD") die("CONTAGENT_CWD is reserved");
+    envs.push([k, expandEnvironment(v, cwd)]);
+  }
   for (const f of features) if (f.enabled) for (const p of f.ports || []) args.push("--publish", String(p));
   for (const [k, v] of envs) args.push("--env", `${k}=${v}`);
 

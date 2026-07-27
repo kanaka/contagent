@@ -204,7 +204,7 @@ features:
     default: false
     environment:
       BROWSER: /usr/local/bin/xdg-open
-      TMPDIR: ./.hostbridge-tmp/
+      TMPDIR: ${CONTAGENT_CWD}/.hostbridge-tmp
     volumes:
       - { path: ./.hostbridge-tmp }
     version:

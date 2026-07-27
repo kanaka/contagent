@@ -244,6 +244,22 @@ EOF
 }
 
 
+test_environment_expansion_semantics() {
+  local tmp
+  tmp=$(mktemp -d)
+  mkdir -p "$tmp/project"
+
+  run_launcher_image_in_dir "$tmp/project" "$img_cli" bash -lc '
+    test "$CONTAGENT_CWD" = "$PWD"
+    test "$TMPDIR" = "$CONTAGENT_CWD/.smoke-env-tmp"
+    cd /
+    test -d "$TMPDIR"
+  ' >/dev/null
+
+  rm -rf "$tmp"
+}
+
+
 cleanup() {
   if [ "${#temp_images[@]}" -gt 0 ]; then
     docker image rm -f "${temp_images[@]}" >/dev/null 2>&1 || true
@@ -270,7 +286,8 @@ config_cli=$(jq -cn '{
   version: 2,
   features: [
     {name: "inc", volumes: [{enabled: true, path: "~/.smoke-inc"}]},
-    {name: "offfeat", volumes: [{enabled: false, path: "~/.smoke-off"}]}
+    {name: "offfeat", volumes: [{enabled: false, path: "~/.smoke-off"}]},
+    {name: "env", environment: {TMPDIR: "${CONTAGENT_CWD}/.smoke-env-tmp"}, volumes: [{path: ".smoke-env-tmp"}]}
   ]
 }')
 
@@ -311,6 +328,7 @@ run_step "source mount create-if-missing behavior" test_source_create_semantics
 run_step "default off toggle behavior" test_default_off_toggle_semantics
 run_step "overlapping feature volumes coalesce" test_overlapping_volume_feature_semantics
 run_step "relative config paths resolve from config dir" test_relative_config_path_semantics
+run_step "environment cwd expansion survives directory changes" test_environment_expansion_semantics
 
 run_step "claude cli availability" run_in_launcher 'command -v claude >/dev/null && claude --version >/dev/null || true'
 run_step "opencode cli availability" run_in_launcher 'command -v opencode >/dev/null && opencode --version >/dev/null || true'

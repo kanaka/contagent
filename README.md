@@ -135,6 +135,7 @@ Environment variables:
 - `CONTAGENT_CONFIG` — config file path (default: `.contagent.yaml`)
 - `CONTAGENT_DOCKER_ARGS` — extra `docker run` arguments (shell-quoted string)
 - `CONTAGENT_EXTRA_GROUP_GIDS` — comma-separated supplementary GIDs applied at container startup
+- `CONTAGENT_CWD` — injected absolute container workdir; reserved for contagent
 
 ### `.contagent.yaml`
 
@@ -174,7 +175,7 @@ features:
   - **`source`** — host path when it differs from `path`.
   - **`read_only`** — mount read-only (default: `false`).
   - **`file`** — `true` if the path is a file; a zero-byte file is created if it doesn't exist (default: `false`).
-- **`environment`** — map of env vars injected when the feature is enabled; replaces the embedded map for that feature.
+- **`environment`** — map of env vars injected when the feature is enabled; replaces the embedded map for that feature. Values may contain `${CONTAGENT_CWD}`, which contagent expands to the absolute container workdir at launch. No other environment-variable expansion is performed.
 - **`ports`** — list of `docker --publish` port specs; replaces the embedded list for that feature.
 
 ## Hostbridge
