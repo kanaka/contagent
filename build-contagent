@@ -4,6 +4,8 @@ const { existsSync, readFileSync, writeFileSync } = require('fs');
 const { join } = require('path');
 const YAML = require('yaml');
 
+const root = __dirname;
+
 const USAGE = `Usage: ./build-contagent [--<feature> ...]
 
 Features, aliases, order, snippets, and version rules come from build-contagent.yaml.
@@ -14,8 +16,9 @@ function die(msg) { process.stderr.write(`ERROR: ${msg}\n`); process.exit(1); }
 
 function sh(cmd, args = [], opts = {}) {
   try {
-    if (opts.capture === false) { execFileSync(cmd, args, { stdio: 'inherit', env: opts.env }); return ''; }
-    return execFileSync(cmd, args, { encoding: 'utf8', env: opts.env }).trim();
+    const execOpts = { cwd: root, env: opts.env };
+    if (opts.capture === false) { execFileSync(cmd, args, { ...execOpts, stdio: 'inherit' }); return ''; }
+    return execFileSync(cmd, args, { ...execOpts, encoding: 'utf8' }).trim();
   } catch (e) { die(`command failed: ${cmd} ${args.join(' ')}\n${(e.stderr || '').toString().trim()}`); }
 }
 
@@ -32,7 +35,6 @@ if (!which('gzip')) die('gzip is required');
 
 const { env } = process;
 const imageName = env.CONTAGENT_IMAGE_NAME || 'contagent';
-const root = __dirname;
 const manifestFile = join(root, 'build-contagent.yaml');
 if (!existsSync(manifestFile)) die(`missing manifest: ${manifestFile}`);
 
