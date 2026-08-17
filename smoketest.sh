@@ -4,6 +4,16 @@ set -euo pipefail
 
 CONTAGENT_IMAGE=${CONTAGENT_IMAGE:-contagent:latest}
 
+# Normalize TMPDIR: a relative value makes mktemp emit relative paths, which
+# break when used as HOME or docker mount sources below.
+if [ -n "${TMPDIR:-}" ]; then
+  if tmpdir_abs=$(cd "$TMPDIR" 2>/dev/null && pwd); then
+    export TMPDIR="$tmpdir_abs"
+  else
+    unset TMPDIR
+  fi
+fi
+
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 usage() {
@@ -81,13 +91,13 @@ config_for_image() {
 
 run_in_launcher() {
   CONTAGENT_IMAGE="$CONTAGENT_IMAGE" "$launcher" \
-    --config "$(config_for_image "$CONTAGENT_IMAGE")" bash -lc "$1"
+    --config "$(config_for_image "$CONTAGENT_IMAGE")" bash -lc "set -e; $1"
 }
 
 
 run_in_launcher_with_docker_socket() {
   CONTAGENT_IMAGE="$CONTAGENT_IMAGE" "$launcher" \
-    --config "$(config_for_image "$CONTAGENT_IMAGE")" --docker bash -lc "$1"
+    --config "$(config_for_image "$CONTAGENT_IMAGE")" --docker bash -lc "set -e; $1"
 }
 
 
@@ -155,13 +165,20 @@ build_config_image() {
 
 
 run_cache_mount_test() {
-  mkdir -p "$HOME/.cache/contagent"
-  : >"$HOME/.cache/contagent/.host-to-container-$cache_token"
+  local rc=0 cache_dir="$HOME/.cache/contagent"
+  # Nested inside contagent, ~/.cache is already the runtime cache mount;
+  # the launcher's ~/.cache/contagent source names that mount on the real host.
+  if [ -L "$HOME/.cache" ] && [ "$(readlink "$HOME/.cache")" = /var/cache/contagent ]; then
+    cache_dir=/var/cache/contagent
+  fi
+  mkdir -p "$cache_dir"
+  : >"$cache_dir/.host-to-container-$cache_token"
 
-  run_launcher_image "$CONTAGENT_IMAGE" bash -lc "test -L \"\$HOME/.cache\" && test \"\$(readlink \"\$HOME/.cache\")\" = \"/var/cache/contagent\" && test -f \"\$HOME/.cache/.host-to-container-$cache_token\" && : > \"\$HOME/.cache/.container-to-host-$cache_token\""
+  run_launcher_image "$CONTAGENT_IMAGE" bash -lc "test -L \"\$HOME/.cache\" && test \"\$(readlink \"\$HOME/.cache\")\" = \"/var/cache/contagent\" && test -f \"\$HOME/.cache/.host-to-container-$cache_token\" && : > \"\$HOME/.cache/.container-to-host-$cache_token\"" \
+    && test -f "$cache_dir/.container-to-host-$cache_token" || rc=1
 
-  test -f "$HOME/.cache/contagent/.container-to-host-$cache_token"
-  rm -f "$HOME/.cache/contagent/.host-to-container-$cache_token" "$HOME/.cache/contagent/.container-to-host-$cache_token"
+  rm -f "$cache_dir/.host-to-container-$cache_token" "$cache_dir/.container-to-host-$cache_token"
+  return "$rc"
 }
 
 
@@ -188,83 +205,86 @@ test_unknown_option() {
 
 
 test_source_create_semantics() {
-  local tmp
+  local tmp rc=0
   tmp=$(mktemp -d)
-  HOME="$tmp" run_launcher_image "$img_cli" true >/dev/null 2>/dev/null
-  test -e "$tmp/.smoke-inc"
+  HOME="$tmp" run_launcher_image "$img_cli" true >/dev/null 2>/dev/null \
+    && test -e "$tmp/.smoke-inc" || rc=1
   rm -rf "$tmp"
+  return "$rc"
 }
 
 
 test_default_off_toggle_semantics() {
-  local tmp
+  local tmp rc=0
   tmp=$(mktemp -d)
 
-  HOME="$tmp" run_launcher_image "$img_cli" true >/dev/null 2>/dev/null
-  [ ! -e "$tmp/.smoke-off" ]
-
-  HOME="$tmp" run_launcher_image "$img_cli" --offfeat true >/dev/null 2>/dev/null
-  [ -e "$tmp/.smoke-off" ]
+  # Fresh HOME per launch: HOME state can persist when it lands inside a
+  # mounted tree (e.g. nested runs), and reuse trips the entrypoint guards.
+  HOME="$tmp/off" run_launcher_image "$img_cli" true >/dev/null 2>/dev/null \
+    && [ ! -e "$tmp/off/.smoke-off" ] \
+    && HOME="$tmp/on" run_launcher_image "$img_cli" --offfeat true >/dev/null 2>/dev/null \
+    && [ -e "$tmp/on/.smoke-off" ] || rc=1
 
   rm -rf "$tmp"
+  return "$rc"
 }
 
 
 test_overlapping_volume_feature_semantics() {
-  local tmp
+  local tmp rc=0
   tmp=$(mktemp -d)
 
-  HOME="$tmp" run_launcher_image "$img_overlap" true >/dev/null 2>/dev/null
-  [ -d "$tmp/.smoke-shared" ]
-
-  rm -rf "$tmp/.smoke-shared"
-  HOME="$tmp" run_launcher_image "$img_overlap" --no-alpha true >/dev/null 2>/dev/null
-  [ -d "$tmp/.smoke-shared" ]
-
-  rm -rf "$tmp/.smoke-shared"
-  HOME="$tmp" run_launcher_image "$img_overlap" --no-alpha --no-beta true >/dev/null 2>/dev/null
-  [ ! -e "$tmp/.smoke-shared" ]
+  HOME="$tmp/both" run_launcher_image "$img_overlap" true >/dev/null 2>/dev/null \
+    && [ -d "$tmp/both/.smoke-shared" ] \
+    && HOME="$tmp/beta" run_launcher_image "$img_overlap" --no-alpha true >/dev/null 2>/dev/null \
+    && [ -d "$tmp/beta/.smoke-shared" ] \
+    && HOME="$tmp/none" run_launcher_image "$img_overlap" --no-alpha --no-beta true >/dev/null 2>/dev/null \
+    && [ ! -e "$tmp/none/.smoke-shared" ] || rc=1
 
   rm -rf "$tmp"
+  return "$rc"
 }
 
 
-test_relative_config_path_semantics() {
-  local tmp
-  local config
+test_relative_volume_source_semantics() {
+  local tmp rc=0
   tmp=$(mktemp -d)
-  config="$tmp/configs/relative.yaml"
+  mkdir -p "$tmp/project" "$tmp/configs"
 
-  mkdir -p "$(dirname "$config")"
-  cat >"$config" <<'EOF'
+  cat >"$tmp/configs/relative.yaml" <<'EOF'
 version: 2
 image-hash: smoke
 features:
-  - name: rel
+  - name: inc
     volumes:
-      - {enabled: true, source: ./host-rel, path: ~/.smoke-rel}
+      - {source: ./host-rel, path: ~/.smoke-rel}
 EOF
 
-  HOME="$tmp/home" run_launcher_image "$img_cli" --config "$config" true >/dev/null 2>/dev/null
-  [ -d "$tmp/configs/host-rel" ]
+  HOME="$tmp/home" run_launcher_image_in_dir "$tmp/project" "$img_cli" \
+    --config "$tmp/configs/relative.yaml" true >/dev/null 2>/dev/null \
+    && [ -d "$tmp/project/host-rel" ] \
+    && [ ! -e "$tmp/configs/host-rel" ] || rc=1
 
   rm -rf "$tmp"
+  return "$rc"
 }
 
 
 test_environment_expansion_semantics() {
-  local tmp
+  local tmp rc=0
   tmp=$(mktemp -d)
   mkdir -p "$tmp/project"
 
-  run_launcher_image_in_dir "$tmp/project" "$img_cli" bash -lc '
+  HOME="$tmp/home" run_launcher_image_in_dir "$tmp/project" "$img_cli" --env bash -lc '
+    set -e
     test "$CONTAGENT_CWD" = "$PWD"
     test "$TMPDIR" = "$CONTAGENT_CWD/.smoke-env-tmp"
     cd /
     test -d "$TMPDIR"
-  ' >/dev/null
+  ' >/dev/null || rc=1
 
   rm -rf "$tmp"
+  return "$rc"
 }
 
 
@@ -293,17 +313,17 @@ smoke_prefix="contagent-smoketest-${$}-$(date +%s)"
 config_cli=$(jq -cn '{
   version: 2,
   features: [
-    {name: "inc", volumes: [{enabled: true, path: "~/.smoke-inc"}]},
-    {name: "offfeat", volumes: [{enabled: false, path: "~/.smoke-off"}]},
-    {name: "env", environment: {TMPDIR: "${CONTAGENT_CWD}/.smoke-env-tmp"}, volumes: [{path: ".smoke-env-tmp"}]}
+    {name: "inc", enabled: true, volumes: [{path: "~/.smoke-inc"}]},
+    {name: "offfeat", enabled: false, volumes: [{path: "~/.smoke-off"}]},
+    {name: "env", enabled: false, environment: {TMPDIR: "${CONTAGENT_CWD}/.smoke-env-tmp"}, volumes: [{path: ".smoke-env-tmp"}]}
   ]
 }')
 
 config_overlap=$(jq -cn '{
   version: 2,
   features: [
-    {name: "alpha", volumes: [{enabled: true, path: "~/.smoke-shared"}]},
-    {name: "beta", volumes: [{enabled: true, path: "~/.smoke-shared"}]}
+    {name: "alpha", enabled: true, volumes: [{path: "~/.smoke-shared"}]},
+    {name: "beta", enabled: true, volumes: [{path: "~/.smoke-shared"}]}
   ]
 }')
 
@@ -335,7 +355,7 @@ run_step "unknown option error" test_unknown_option
 run_step "source mount create-if-missing behavior" test_source_create_semantics
 run_step "default off toggle behavior" test_default_off_toggle_semantics
 run_step "overlapping feature volumes coalesce" test_overlapping_volume_feature_semantics
-run_step "relative config paths resolve from config dir" test_relative_config_path_semantics
+run_step "relative volume sources resolve from launcher cwd" test_relative_volume_source_semantics
 run_step "environment cwd expansion survives directory changes" test_environment_expansion_semantics
 
 run_step "claude cli availability" run_in_launcher 'command -v claude >/dev/null && claude --version >/dev/null || true'

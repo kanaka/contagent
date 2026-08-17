@@ -172,7 +172,7 @@ features:
 - **`name`** *(required)* — must match a feature name in the embedded config.
 - **`enabled`** — `true`/`false`; overrides the feature default. CLI `--<feature>`/`--no-<feature>` overrides this further.
 - **`volumes`** — replaces the embedded volume list entirely when present.
-  - **`path`** *(required)* — container mount target and default host source. Relative paths resolve against the config file's directory; `~` expands to `$HOME`.
+  - **`path`** *(required)* — container mount target and default host source. Relative paths resolve against the launcher's working directory; `~` expands to `$HOME`.
   - **`source`** — host path when it differs from `path`.
   - **`read_only`** — mount read-only (default: `false`).
   - **`file`** — `true` if the path is a file; a zero-byte file is created if it doesn't exist (default: `false`).
