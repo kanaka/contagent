@@ -13,7 +13,7 @@ features:
     version:
       env: BUILD_ESSENTIAL_VERSION
       default: latest
-      resolve: curl -fsSL "https://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages.gz" | gzip -dc | awk '/^Package:[[:space:]]build-essential$/{f=1} f&&/^Version:[[:space:]]/{v=$2;f=0} END{print v}'
+      resolve: curl -fsSL "https://deb.debian.org/debian/dists/trixie/main/binary-amd64/Packages.gz" | gzip -dc | awk '/^Package:[[:space:]]build-essential$/{f=1} f&&/^Version:[[:space:]]/{v=$2;f=0} END{print v}'
 
   - name: java
     aliases: [jdk, clojure, clj, clojurescript, cljs, all, all-tools]
@@ -72,7 +72,7 @@ features:
     version:
       env: DOCKER_VERSION
       default: latest
-      resolve: arch=$(uname -m); case "$arch" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) arch=amd64 ;; esac; curl -fsSL "https://download.docker.com/linux/debian/dists/bookworm/stable/binary-${arch}/Packages" | awk '/^Package:[[:space:]]docker-ce-cli$/{p=1;next} p&&/^Version:[[:space:]]/{v=$2} p&&/^$/{p=0} END{print v}'
+      resolve: arch=$(uname -m); case "$arch" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) arch=amd64 ;; esac; curl -fsSL "https://download.docker.com/linux/debian/dists/trixie/stable/binary-${arch}/Packages" | awk '/^Package:[[:space:]]docker-ce-cli$/{p=1;next} p&&/^Version:[[:space:]]/{v=$2} p&&/^$/{p=0} END{print v}'
 
   - name: psql
     aliases: [postgres, postgresql, all, all-tools]
@@ -82,7 +82,7 @@ features:
     version:
       env: PSQL_VERSION
       default: latest
-      resolve: curl -fsSL "https://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages.gz" | gzip -dc | awk '/^Package:[[:space:]]postgresql-client$/{f=1} f&&/^Version:[[:space:]]/{v=$2;f=0} END{print v}'
+      resolve: curl -fsSL "https://deb.debian.org/debian/dists/trixie/main/binary-amd64/Packages.gz" | gzip -dc | awk '/^Package:[[:space:]]postgresql-client$/{f=1} f&&/^Version:[[:space:]]/{v=$2;f=0} END{print v}'
 
   - name: gh
     aliases: [github, github-cli, githubcli, all, all-tools]
@@ -101,7 +101,7 @@ features:
     version:
       env: RUBY_VERSION
       default: latest
-      resolve: curl -fsSL "https://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages.gz" | gzip -dc | awk '/^Package:[[:space:]]ruby$/{f=1} f&&/^Version:[[:space:]]/{v=$2;f=0} END{print v}'
+      resolve: curl -fsSL "https://deb.debian.org/debian/dists/trixie/main/binary-amd64/Packages.gz" | gzip -dc | awk '/^Package:[[:space:]]ruby$/{f=1} f&&/^Version:[[:space:]]/{v=$2;f=0} END{print v}'
 
   - name: vagrant
     aliases: [all, all-tools]
