@@ -1,7 +1,6 @@
 ARG JAVA_VERSION=latest
 
 ENV JAVA_HOME=/usr/local/jdk
-ENV PATH=${JAVA_HOME}/bin:${PATH}
 
 RUN arch="$(dpkg --print-architecture)" \
     && case "$arch" in \
@@ -16,4 +15,5 @@ RUN arch="$(dpkg --print-architecture)" \
     && [ -n "$jdk_dir" ] \
     && rm -rf /usr/local/jdk \
     && mv "$jdk_dir" /usr/local/jdk \
+    && for b in /usr/local/jdk/bin/*; do ln -sf "$b" "/usr/local/bin/${b##*/}"; done \
     && rm -rf "$tmpdir" /tmp/jdk.tar.gz

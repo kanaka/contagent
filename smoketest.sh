@@ -335,6 +335,7 @@ run_step "opencode cli availability" run_in_launcher 'command -v opencode >/dev/
 run_step "pi cli availability" run_in_launcher 'command -v pi >/dev/null && pi --version >/dev/null || true'
 run_step "codex cli availability" run_in_launcher 'command -v codex >/dev/null && codex --version >/dev/null || true'
 run_step "copilot cli availability" run_in_launcher 'command -v copilot >/dev/null && copilot --version >/dev/null || true'
+run_step "java availability" run_in_launcher 'if [ -e /usr/local/jdk ]; then command -v java >/dev/null && java --version >/dev/null; fi'
 run_step "rust toolchain availability" run_in_launcher 'if command -v cargo >/dev/null; then cargo --version >/dev/null; command -v rustc >/dev/null; rustc --version >/dev/null; fi'
 run_step "cargo install root usability" run_in_launcher 'if command -v cargo >/dev/null; then cargo install --list >/dev/null; fi'
 
