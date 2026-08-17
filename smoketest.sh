@@ -165,12 +165,20 @@ run_cache_mount_test() {
 }
 
 
-test_show_options_dynamic() {
-  local out
-  out=$(run_launcher_image "$img_cli" --show-options)
-  grep -F -- "--inc / --no-inc (default: on" <<<"$out" >/dev/null
-  grep -F -- "--offfeat / --no-offfeat (default: off" <<<"$out" >/dev/null
-  ! grep -F -- "--hidden / --no-hidden" <<<"$out" >/dev/null
+feature_block() {
+  awk -v name="$1" '$0 == "  - name: " name {f=1;next} /^  - name:/{f=0} f'
+}
+
+
+test_show_config_dynamic() {
+  local out flagged
+  out=$(run_launcher_image "$img_cli" --show-config) \
+    && grep -F -- "name: inc" <<<"$out" >/dev/null \
+    && grep -F -- "name: offfeat" <<<"$out" >/dev/null \
+    && ! grep -F -- "name: hidden" <<<"$out" >/dev/null \
+    && ! feature_block offfeat <<<"$out" | grep -F -- "enabled: true" >/dev/null \
+    && flagged=$(run_launcher_image "$img_cli" --show-config --offfeat) \
+    && feature_block offfeat <<<"$flagged" | grep -F -- "enabled: true" >/dev/null
 }
 
 
@@ -322,7 +330,7 @@ run_step "docker cli available" run_in_launcher '
 
 run_step "docker daemon reachable" run_in_launcher_with_docker_socket 'docker ps >/dev/null'
 
-run_step "dynamic show-options output" test_show_options_dynamic
+run_step "dynamic show-config output" test_show_config_dynamic
 run_step "unknown option error" test_unknown_option
 run_step "source mount create-if-missing behavior" test_source_create_semantics
 run_step "default off toggle behavior" test_default_off_toggle_semantics
