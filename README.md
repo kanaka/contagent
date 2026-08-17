@@ -83,6 +83,7 @@ Build-time options:
   - `--gh` (aliases: `--github`, `--github-cli`, `--githubcli`) + `GH_VERSION`
   - `--aws` (aliases: `--aws-cli`, `--awscli`, `--amazon`, `--amazon-web-services`) + `AWS_CLI_VERSION`
   - `--mise` + `MISE_VERSION`
+  - `--uv` (alias: `--uvx`) + `UV_VERSION`
   - `--psql` (aliases: `--postgres`, `--postgresql`) + `PSQL_VERSION`
   - `--go` (alias: `--golang`) + `GO_VERSION`
   - `--java` (aliases: `--jdk`, `--clojure`, `--clj`, `--clojurescript`, `--cljs`) + `JAVA_VERSION`

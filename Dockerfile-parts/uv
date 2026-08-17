@@ -1,0 +1,11 @@
+ARG UV_VERSION
+
+RUN arch="$(dpkg --print-architecture)" \
+    && case "$arch" in \
+      amd64) uv_arch=x86_64 ;; \
+      arm64) uv_arch=aarch64 ;; \
+      *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${uv_arch}-unknown-linux-gnu.tar.gz" -o /tmp/uv.tgz \
+    && tar -C /usr/local/bin --strip-components=1 -xzf /tmp/uv.tgz \
+    && rm -f /tmp/uv.tgz

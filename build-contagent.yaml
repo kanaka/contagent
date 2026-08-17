@@ -157,6 +157,16 @@ features:
       default: latest
       resolve: curl -fsSL "https://registry.npmjs.org/agent-browser/latest" | jq -r .version
 
+  - name: uv
+    aliases: [uvx, all, all-tools]
+    path: Dockerfile-parts/uv
+    volumes:
+      - { path: ~/.local/share/uv }
+    version:
+      env: UV_VERSION
+      default: latest
+      resolve: curl -fsSL "https://api.github.com/repos/astral-sh/uv/releases/latest" | jq -r '.tag_name'
+
   - name: claude
     aliases: [claude-code, cc, claudecode, all, all-agents]
     path: Dockerfile-parts/claude-code
