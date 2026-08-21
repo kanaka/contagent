@@ -149,7 +149,9 @@ features:
   - name: agent-browser
     aliases: [agentbrowser, browser, all, all-tools]
     path: Dockerfile-parts/agent-browser
-    default: false
+    volumes:
+      - { path: ~/.config/google-chrome-for-testing/ } # crashpad database dir required to startup
+      - { path:  ~/.local/share/pki/ }  # NSS cert DB (err logging)
     version:
       env: AGENT_BROWSER_VERSION
       default: latest

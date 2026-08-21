@@ -2,5 +2,36 @@ ARG AGENT_BROWSER_VERSION
 
 RUN npm install -g \
     "agent-browser@${AGENT_BROWSER_VERSION}" \
-    && npm cache clean --force \
-    && agent-browser install --with-deps
+    && npm cache clean --force
+
+# Install Chrome for Testing to a system path. On arm64 agent-browser install
+# hardcodes a rejection, so we download directly. On amd64 we could use
+# agent-browser install but do the same for consistency — both get deps via
+# apt's chromium package and Chrome for Testing to /opt.
+#
+# TODO: revert this whole RUN block (and the ENV below) to the simpler
+#     && agent-browser install --with-deps
+# appended to the npm install RUN above, once both of these are resolved:
+#
+# 1. Chrome for Testing ships linux-arm64 in the Stable channel (currently
+#    Beta/Dev/Canary only). Track: https://github.com/GoogleChromeLabs/chrome-for-testing/issues/1
+#    Check: curl -fsSL https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json \
+#             | jq '[.channels.Stable.downloads.chrome[].platform] | contains(["linux-arm64"])'
+#
+# 2. agent-browser drops its hardcoded linux/aarch64 rejection in
+#    run_install() / platform_key() (cli/src/install.rs).
+#    Track: https://github.com/vercel-labs/agent-browser/issues/248
+#    Check: agent-browser install succeeds on an arm64 host.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends chromium \
+    && rm -rf /var/lib/apt/lists/* \
+    && ARCH=$(dpkg --print-architecture) \
+    && case "$ARCH" in arm64) P=linux-arm64;; amd64) P=linux64;; *) echo "unsupported: $ARCH" >&2; exit 1;; esac \
+    && CFT_JSON=$(curl -fsSL "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json") \
+    && CFT_URL=$(printf '%s' "$CFT_JSON" | jq -r --arg p "$P" '([.channels.Stable.downloads.chrome[]? | select(.platform==$p)] | first | .url) // ([.channels[].downloads.chrome[]? | select(.platform==$p)] | first | .url)') \
+    && curl -fsSL "$CFT_URL" -o /tmp/chrome.zip \
+    && unzip -q /tmp/chrome.zip -d /tmp/cft \
+    && mv /tmp/cft/chrome-"$P" /opt/chrome-for-testing \
+    && rm -rf /tmp/chrome.zip /tmp/cft
+
+ENV AGENT_BROWSER_EXECUTABLE_PATH=/opt/chrome-for-testing/chrome
