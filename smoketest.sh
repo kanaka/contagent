@@ -46,8 +46,11 @@ if [ "$#" -eq 1 ] && { [ "$1" = "-h" ] || [ "$1" = "--help" ]; }; then
 fi
 
 launcher_input=${1:-contagent}
-if [[ "$launcher_input" = /* || "$launcher_input" == */* ]]; then
+if [[ "$launcher_input" = /* ]]; then
   launcher=$launcher_input
+elif [[ "$launcher_input" == */* ]]; then
+  # Absolutize: some tests run the launcher from other directories.
+  launcher="$(cd "$(dirname "$launcher_input")" && pwd)/$(basename "$launcher_input")"
 else
   launcher="$script_dir/$launcher_input"
 fi
@@ -208,7 +211,8 @@ test_source_create_semantics() {
   local tmp rc=0
   tmp=$(mktemp -d)
   HOME="$tmp" run_launcher_image "$img_cli" true >/dev/null 2>/dev/null \
-    && test -e "$tmp/.smoke-inc" || rc=1
+    && test -e "$tmp/.smoke-inc" \
+    && test -d "$tmp/host-abs-src" || rc=1
   rm -rf "$tmp"
   return "$rc"
 }
@@ -271,17 +275,26 @@ EOF
 
 
 test_environment_expansion_semantics() {
-  local tmp rc=0
+  local tmp rc=0 err
   tmp=$(mktemp -d)
   mkdir -p "$tmp/project"
 
-  HOME="$tmp/home" run_launcher_image_in_dir "$tmp/project" "$img_cli" --env bash -lc '
+  err=$(HOME="$tmp/home" run_launcher_image_in_dir "$tmp/project" "$img_cli" --env bash -lc '
     set -e
     test "$CONTAGENT_CWD" = "$PWD"
     test "$TMPDIR" = "$CONTAGENT_CWD/.smoke-env-tmp"
+    test "$SMOKE_TILDE" = "$HOME/tilde-dir"
+    test "$SMOKE_HOME" = "$HOME/from-home"
+    test "$SMOKE_PWD" = "$CONTAGENT_CWD"
+    test "$SMOKE_USER" = "$(id -un)"
+    test "$SMOKE_UNKNOWN" = "\${NOT_A_THING}/x"
+    test "$SMOKE_REL" = "./rel-literal"
+    test -z "${SMOKE_NULL:-}"
     cd /
     test -d "$TMPDIR"
-  ' >/dev/null || rc=1
+  ' 2>&1 >/dev/null) \
+    && grep -F -- "non-string environment value for SMOKE_NULL" <<<"$err" >/dev/null \
+    && grep -F -- "SMOKE_REL is passed literally" <<<"$err" >/dev/null || rc=1
 
   rm -rf "$tmp"
   return "$rc"
@@ -313,9 +326,14 @@ smoke_prefix="contagent-smoketest-${$}-$(date +%s)"
 config_cli=$(jq -cn '{
   version: 2,
   features: [
-    {name: "inc", enabled: true, volumes: [{path: "~/.smoke-inc"}]},
+    {name: "inc", enabled: true,
+     volumes: [{path: "~/.smoke-inc"}, {source: "${HOME}/host-abs-src", path: "~/.smoke-abs"}]},
     {name: "offfeat", enabled: false, volumes: [{path: "~/.smoke-off"}]},
-    {name: "env", enabled: false, environment: {TMPDIR: "${CONTAGENT_CWD}/.smoke-env-tmp"}, volumes: [{path: ".smoke-env-tmp"}]}
+    {name: "env", enabled: false,
+     environment: {TMPDIR: "${CONTAGENT_CWD}/.smoke-env-tmp", SMOKE_TILDE: "~/tilde-dir",
+                   SMOKE_HOME: "${HOME}/from-home", SMOKE_PWD: "${PWD}", SMOKE_USER: "${USER}",
+                   SMOKE_UNKNOWN: "${NOT_A_THING}/x", SMOKE_NULL: null, SMOKE_REL: "./rel-literal"},
+     volumes: [{path: ".smoke-env-tmp"}]}
   ]
 }')
 
@@ -356,7 +374,7 @@ run_step "source mount create-if-missing behavior" test_source_create_semantics
 run_step "default off toggle behavior" test_default_off_toggle_semantics
 run_step "overlapping feature volumes coalesce" test_overlapping_volume_feature_semantics
 run_step "relative volume sources resolve from launcher cwd" test_relative_volume_source_semantics
-run_step "environment cwd expansion survives directory changes" test_environment_expansion_semantics
+run_step "environment expansion semantics" test_environment_expansion_semantics
 
 run_step "claude cli availability" run_in_launcher 'command -v claude >/dev/null && claude --version >/dev/null || true'
 run_step "opencode cli availability" run_in_launcher 'command -v opencode >/dev/null && opencode --version >/dev/null || true'

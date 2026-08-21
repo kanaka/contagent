@@ -39,10 +39,12 @@ function shellSplit(s) {
   return args;
 }
 
-const resolvePath = (raw, home, base) =>
-  raw === "~" || raw.startsWith("~/") ? path.resolve(home, raw.slice(2) || ".")
-  : path.resolve(base, raw);
-const expandEnvironment = (value, cwd) => String(value).replaceAll("${CONTAGENT_CWD}", cwd);
+// Shared config-value expansion: leading ~ and the injected identity vars.
+const expandValue = (value, vars) => {
+  const v = value === "~" || value.startsWith("~/") ? vars.HOME + value.slice(1) : value;
+  return v.replace(/\$\{(\w+)\}/g, (m, n) => Object.hasOwn(vars, n) ? vars[n] : m);
+};
+const resolvePath = (raw, vars, base) => path.resolve(base, expandValue(raw, vars));
 
 function embeddedConfig(image) {
   const r = cp.spawnSync("docker", ["run", "--rm", "--entrypoint", "cat", image, EMBEDDED], { encoding: "utf8" });
@@ -110,15 +112,17 @@ function parseArgs(argv, featureNames) {
 
 // ---------- volumes ----------
 
-function mountPlan(features, home, base) {
+function mountPlan(features, vars, base) {
+  const under = (p, dir) => p === dir || p.startsWith(dir + path.sep);
   const targets = new Map();
   for (const f of features) {
     if (!f.enabled || !f.volumes) continue;
     for (const v of f.volumes) {
-      const src = resolvePath(v.source || v.path, home, base);
-      const tgt = resolvePath(v.path, home, base);
+      const src = resolvePath(v.source || v.path, vars, base);
+      const tgt = resolvePath(v.path, vars, base);
       if (!targets.has(tgt)) targets.set(tgt, []);
-      const c = { src, file: !!v.file, ro: !!v.read_only, create: /^~/.test(v.source || v.path) || !path.isAbsolute(v.source || v.path) };
+      // Create missing sources only when user-scoped: under home or the project cwd.
+      const c = { src, file: !!v.file, ro: !!v.read_only, create: under(src, vars.HOME) || under(src, base) };
       if (!targets.get(tgt).some(x => x.src === c.src)) targets.get(tgt).push(c);
     }
   }
@@ -190,24 +194,33 @@ function main() {
   const args = ["run", "--rm", "--workdir", cwd, "--volume", `${cwd}:${cwd}`];
   if (process.stdin.isTTY && process.stdout.isTTY) args.push("--interactive", "--tty");
 
+  const identity = {
+    CONTAGENT_USERNAME: process.env.USER || id("-un"),
+    CONTAGENT_GROUPNAME: id("-gn"),
+    CONTAGENT_UID: id("-u"),
+    CONTAGENT_GID: id("-g"),
+    CONTAGENT_HOME: home,
+    CONTAGENT_CWD: cwd,
+  };
+  // Expansion vocabulary is exactly what contagent injects; host env never leaks.
+  const expandVars = { ...identity, HOME: home, PWD: cwd, USER: identity.CONTAGENT_USERNAME };
   const envs = [
-    ["CONTAGENT_USERNAME", process.env.USER || id("-un")],
-    ["CONTAGENT_GROUPNAME", id("-gn")],
-    ["CONTAGENT_UID", id("-u")],
-    ["CONTAGENT_GID", id("-g")],
-    ["CONTAGENT_HOME", home],
-    ["CONTAGENT_CWD", cwd],
+    ...Object.entries(identity),
     ...(process.env.TERM ? [["TERM", process.env.TERM]] : []),
     ...(process.env.COLORTERM ? [["COLORTERM", process.env.COLORTERM]] : []),
   ];
-  for (const f of features) if (f.enabled) for (const [k, v] of Object.entries(f.environment || {})) {
+  for (const f of features) if (f.enabled) for (let [k, v] of Object.entries(f.environment || {})) {
     if (k === "CONTAGENT_CWD") die("CONTAGENT_CWD is reserved");
-    envs.push([k, expandEnvironment(v, cwd)]);
+    if (typeof v === "number" || typeof v === "boolean") v = String(v);
+    if (typeof v !== "string") { warn(`feature ${f.name}: ignoring non-string environment value for ${k} (unquoted ~ is YAML null)`); continue; }
+    if (v.startsWith("./") || v.startsWith("../"))
+      warn(`feature ${f.name}: ${k} is passed literally; use \${PWD}/... for a launch-dir-relative path`);
+    envs.push([k, expandValue(v, expandVars)]);
   }
   for (const f of features) if (f.enabled) for (const p of f.ports || []) args.push("--publish", String(p));
   for (const [k, v] of envs) args.push("--env", `${k}=${v}`);
 
-  const { specs, gids } = mountPlan(features, home, cwd);
+  const { specs, gids } = mountPlan(features, expandVars, cwd);
   for (const s of specs) args.push("--volume", s);
   const ssh = process.env.SSH_AUTH_SOCK || "";
   if (ssh && isSocket(ssh)) args.push("--volume", `${ssh}:${ssh}`, "--env", `SSH_AUTH_SOCK=${ssh}`);

@@ -158,6 +158,8 @@ features:
         source: ~/work/.claude  # host path when different from path
         read_only: true     # mount read-only (default: false)
         file: false         # true if the path is a file rather than a directory
+    environment:
+      CLAUDE_CONFIG_DIR: ~/.claude  # leading ~ and ${HOME}/${PWD}/${USER}/${CONTAGENT_*} expand
 
   - name: hostbridge
     enabled: true
@@ -169,14 +171,20 @@ features:
 
 **Field reference:**
 
+Volume `path`/`source` and `environment` values share one expansion rule: a
+leading `~` expands to the mapped home, and `${HOME}`, `${PWD}`, `${USER}`,
+and the injected `${CONTAGENT_*}` identity vars expand to their launch
+values. Unknown `${...}` tokens pass through unchanged; host environment
+variables are never expanded.
+
 - **`name`** *(required)* — must match a feature name in the embedded config.
 - **`enabled`** — `true`/`false`; overrides the feature default. CLI `--<feature>`/`--no-<feature>` overrides this further.
 - **`volumes`** — replaces the embedded volume list entirely when present.
-  - **`path`** *(required)* — container mount target and default host source. Relative paths resolve against the launcher's working directory; `~` expands to `$HOME`.
-  - **`source`** — host path when it differs from `path`.
+  - **`path`** *(required)* — container mount target and default host source. Relative paths resolve against the launcher's working directory.
+  - **`source`** — host path when it differs from `path`. Missing sources under the mapped home or the project directory are created at launch; other sources must already exist.
   - **`read_only`** — mount read-only (default: `false`).
   - **`file`** — `true` if the path is a file; a zero-byte file is created if it doesn't exist (default: `false`).
-- **`environment`** — map of env vars injected when the feature is enabled; replaces the embedded map for that feature. Values may contain `${CONTAGENT_CWD}`, which contagent expands to the absolute container workdir at launch. No other environment-variable expansion is performed.
+- **`environment`** — map of env vars injected when the feature is enabled; replaces the embedded map for that feature. Values are expanded but never path-resolved: a leading `./` passes through literally (with a warning), since it may be meant relative to the consumer's runtime cwd — use `${PWD}/...` for launch-dir-relative. Non-string values are skipped with a warning (unquoted `~` is YAML null — quote it).
 - **`ports`** — list of `docker --publish` port specs; replaces the embedded list for that feature.
 
 ## Hostbridge
