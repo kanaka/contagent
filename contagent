@@ -225,6 +225,13 @@ function main() {
   const ssh = process.env.SSH_AUTH_SOCK || "";
   if (ssh && isSocket(ssh)) args.push("--volume", `${ssh}:${ssh}`, "--env", `SSH_AUTH_SOCK=${ssh}`);
   else warn("SSH agent not available; SSH auth forwarding disabled");
+
+  for (const s of [`${cwd}:${cwd}`, ...specs, ...(ssh && isSocket(ssh) ? [`${ssh}:${ssh}`] : [])]) {
+    const ro = s.endsWith(":ro");
+    const [src, tgt] = (ro ? s.slice(0, -3) : s).split(":");
+    console.error(`[volumes] ${src}${src === tgt ? "" : ` -> ${tgt}`}${ro ? " (ro)" : ""}`);
+  }
+
   const groups = extraGroupSpecs([p.extraGroups, ...gids].filter(Boolean).join(","));
   if (groups) args.push("--env", `CONTAGENT_EXTRA_GROUP_SPECS=${groups}`);
   if (p.dockerArgs) args.push(...shellSplit(p.dockerArgs));
