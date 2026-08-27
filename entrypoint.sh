@@ -105,4 +105,14 @@ getent passwd "$CONTAGENT_USERNAME" >/dev/null 2>&1 || {
   die "mapped user $CONTAGENT_USERNAME does not exist after setup"
 }
 
+# Session bus + Secret Service (keyring feature) must run as the mapped
+# user: both authorize by peer uid. An empty unlock password creates no
+# login keyring, hence the well-known default; a real KEYRING_PASSWORD
+# encrypts at rest.
+runuser -u "$CONTAGENT_USERNAME" -- env HOME="$CONTAGENT_HOME" sh -c '
+  dbus-daemon --session --address="$DBUS_SESSION_BUS_ADDRESS" --fork
+  ! command -v gnome-keyring-daemon >/dev/null \
+    || printf %s "${KEYRING_PASSWORD:-contagent}" | gnome-keyring-daemon --replace --unlock --components=secrets >/dev/null
+'
+
 exec_as_user "$@"

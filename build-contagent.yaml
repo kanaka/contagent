@@ -6,6 +6,15 @@ features:
     required: true
     environment:
       LANG: "C.UTF-8"
+      # Fixed path so docker exec sessions reach the entrypoint-started bus.
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/tmp/contagent-bus"
+
+  - name: keyring
+    aliases: [gnome-keyring]
+    path: Dockerfile-parts/keyring
+    volumes:
+      # Secret Service (gnome-keyring) storage.
+      - { path: ~/.local/share/keyrings }
 
   - name: build
     aliases: [build-tools, all, all-tools]
