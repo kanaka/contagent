@@ -191,8 +191,9 @@ function main() {
   }
 
   // Docker args
-  const args = ["run", "--rm", "--workdir", cwd, "--volume", `${cwd}:${cwd}`];
-  if (process.stdin.isTTY && process.stdout.isTTY) args.push("--interactive", "--tty");
+  const isTTY = process.stdin.isTTY && process.stdout.isTTY;
+  const createArgs = ["--rm", "--workdir", cwd, "--volume", `${cwd}:${cwd}`];
+  if (isTTY) createArgs.push("--interactive", "--tty");
 
   const identity = {
     CONTAGENT_USERNAME: process.env.USER || id("-un"),
@@ -217,35 +218,65 @@ function main() {
       warn(`feature ${f.name}: ${k} is passed literally; use \${PWD}/... for a launch-dir-relative path`);
     envs.push([k, expandValue(v, expandVars)]);
   }
-  for (const f of features) if (f.enabled) for (const p of f.ports || []) args.push("--publish", String(p));
-  for (const [k, v] of envs) args.push("--env", `${k}=${v}`);
+  for (const f of features) if (f.enabled) for (const p of f.ports || []) createArgs.push("--publish", String(p));
+  for (const [k, v] of envs) createArgs.push("--env", `${k}=${v}`);
 
   const { specs, gids } = mountPlan(features, expandVars, cwd);
-  for (const s of specs) args.push("--volume", s);
+  for (const s of specs) createArgs.push("--volume", s);
   const ssh = process.env.SSH_AUTH_SOCK || "";
-  if (ssh && isSocket(ssh)) args.push("--volume", `${ssh}:${ssh}`, "--env", `SSH_AUTH_SOCK=${ssh}`);
+  if (ssh && isSocket(ssh)) createArgs.push("--volume", `${ssh}:${ssh}`, "--env", `SSH_AUTH_SOCK=${ssh}`);
   else warn("SSH agent not available; SSH auth forwarding disabled");
   const groups = extraGroupSpecs([p.extraGroups, ...gids].filter(Boolean).join(","));
-  if (groups) args.push("--env", `CONTAGENT_EXTRA_GROUP_SPECS=${groups}`);
-  if (p.dockerArgs) args.push(...shellSplit(p.dockerArgs));
+  if (groups) createArgs.push("--env", `CONTAGENT_EXTRA_GROUP_SPECS=${groups}`);
+  if (p.dockerArgs) createArgs.push(...shellSplit(p.dockerArgs));
 
-  const hb = features.find(f => f.name === "hostbridge")?.enabled;
-  if (hb) {
-    require("./hostbridge.js").start({ logFile: ".hostbridge-log" }).then(({ port, shutdown }) => {
-      args.push("--env", `HOSTBRIDGE_PORT=${port}`);
-      run(args, image, p.command, shutdown);
-    }).catch(e => die(e.message));
-  } else run(args, image, p.command);
-}
+  async function launch() {
+    let shutdown = null;
 
-function run(args, image, command, shutdown) {
-  const docker = cp.spawn("docker", [...args, image, ...command], { stdio: "inherit" });
-  docker.on("close", code => {
-    const exit = () => process.exit(typeof code === "number" ? code : 1);
-    shutdown ? shutdown().then(exit) : exit();
-  });
-  docker.on("error", e => die(e.message));
-  for (const s of ["SIGINT", "SIGTERM"]) process.on(s, () => docker.kill(s));
+    const hb = features.find(f => f.name === "hostbridge")?.enabled;
+    if (hb) {
+      const { port, shutdown: hbShutdown } = await require("./hostbridge.js").start({ logFile: ".hostbridge-log" });
+      createArgs.push("--env", `HOSTBRIDGE_PORT=${port}`);
+      shutdown = hbShutdown;
+    }
+
+    let herdrProxy = null;
+    const herdr = features.find(f => f.name === "herdr")?.enabled;
+    if (herdr && process.env.HERDR_ENV === "1" && isSocket(process.env.HERDR_SOCKET_PATH || "")) {
+      herdrProxy = await require("./herdr-proxy.js").start({
+        upstreamSocket: process.env.HERDR_SOCKET_PATH,
+      });
+      createArgs.push("--volume", `${herdrProxy.socketPath}:${herdrProxy.socketPath}`, "--env", `HERDR_SOCKET_PATH=${herdrProxy.socketPath}`);
+      for (const v of ["HERDR_ENV", "HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID"]) {
+        if (process.env[v]) createArgs.push("--env", `${v}=${process.env[v]}`);
+      }
+      const prev = shutdown;
+      shutdown = prev ? async () => { await prev(); await herdrProxy.shutdown(); } : herdrProxy.shutdown;
+    }
+
+    const containerId = cp.execFileSync("docker", ["create", ...createArgs, image, ...p.command], { encoding: "utf8" }).trim();
+    if (herdrProxy) herdrProxy.setContainerId(containerId);
+
+    const startArgs = ["start", "-a"];
+    if (isTTY) startArgs.push("-i");
+    startArgs.push(containerId);
+
+    // Herdr detects agents by inspecting the pane's own foreground process; it can't see
+    // across the container boundary. HERDR_AGENT on this host-side `docker start` process
+    // (the pane's actual foreground process) hints which screen manifest to use instead.
+    // See https://herdr.dev/docs/agents/#vms-and-sandbox-wrappers.
+    const dockerEnv = herdr && p.command[0] ? { ...process.env, HERDR_AGENT: p.command[0] } : process.env;
+
+    const docker = cp.spawn("docker", startArgs, { stdio: "inherit", env: dockerEnv });
+    docker.on("close", code => {
+      const exit = () => process.exit(typeof code === "number" ? code : 1);
+      shutdown ? shutdown().then(exit) : exit();
+    });
+    docker.on("error", e => die(e.message));
+    for (const s of ["SIGINT", "SIGTERM"]) process.on(s, () => docker.kill(s));
+  }
+
+  launch().catch(e => die(e.message));
 }
 
 main();

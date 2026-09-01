@@ -1,0 +1,15 @@
+ARG HERDR_VERSION=latest
+
+RUN arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      amd64) herdr_arch=x86_64 ;; \
+      arm64) herdr_arch=aarch64 ;; \
+      *) echo "unsupported architecture for herdr: $arch" >&2; exit 1 ;; \
+    esac; \
+    if [ "$HERDR_VERSION" = latest ]; then \
+      url="https://github.com/ogulcancelik/herdr/releases/latest/download/herdr-linux-${herdr_arch}"; \
+    else \
+      url="https://github.com/ogulcancelik/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-${herdr_arch}"; \
+    fi; \
+    curl -fsSL "$url" -o /usr/local/bin/herdr \
+    && chmod 0755 /usr/local/bin/herdr

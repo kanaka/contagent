@@ -232,6 +232,17 @@ features:
       default: latest
       resolve: ./voom-like-version.sh .
 
+  - name: herdr
+    aliases: [all, all-tools]
+    path: Dockerfile-parts/herdr
+    default: false
+    volumes:
+      - { path: ~/.config/herdr }
+    version:
+      env: HERDR_VERSION
+      default: latest
+      resolve: curl -fsSL "https://herdr.dev/latest.json" | jq -r .version
+
   - name: runtime
     path: Dockerfile-parts/runtime
     required: true
