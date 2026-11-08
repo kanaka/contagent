@@ -265,6 +265,22 @@ CONTAGENT_EXTRA_GROUP_GIDS=970 ./contagent
 ./contagent --extra-groups 970,971
 ```
 
+## Working with local models
+
+If you're running models locally with a tool like `ollama`, you will need to
+make two changes to permit `pi` inside `contagent` to communicate with the
+host operating system.
+
+First, serve your local model on the host in a way that permits connections 
+from the Docker container to the host. Be mindful of any security risks this 
+might involve.  With `ollama`, for example, instead of `ollama serve` you 
+would run `OLLAMA_HOST=0.0.0.0 ollama serve`.
+
+Second, in your `~/.pi/agent/models.json`, change the `baseUrl` host address from
+`127.0.0.1` to `docker.host.internal`.  If you don't have a 
+`~/.pi/agent/models.json` file, you may want to install Pi in your host operating
+system just for the sake of having it created.
+
 ## Trust model and security boundaries
 
 Contagent reduces exposure; it is not a hard security sandbox.
