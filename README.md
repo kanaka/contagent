@@ -145,6 +145,7 @@ Injected into the container (reserved; can't be set via `environment`):
 
 - `CONTAGENT_ROOT` — absolute project root
 - `CONTAGENT_CWD` — absolute container workdir (the launch directory)
+- `CONTAGENT_ENABLED_FEATURES` — comma-separated list of enabled runtime features
 
 ### Project root and workdir
 
