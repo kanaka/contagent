@@ -126,6 +126,7 @@ embedded defaults → .contagent.yaml (if present) → CLI flags
 ### Command-line flags
 
 - `-c CONFIG`, `--config CONFIG` — config file path; overrides `CONTAGENT_CONFIG`
+- `--root DIR` — project root; overrides `CONTAGENT_ROOT` (see [Project root and workdir](#project-root-and-workdir))
 - `--show-config` — print the fully merged effective config and exit
 - `--update-config` — apply feature flags to the config file and write it back; requires at least one flag
 - `--<feature>` / `--no-<feature>` — enable or disable a feature for this run
@@ -135,10 +136,31 @@ embedded defaults → .contagent.yaml (if present) → CLI flags
 Environment variables:
 
 - `CONTAGENT_IMAGE` — image to run (default: `contagent:latest`)
-- `CONTAGENT_CONFIG` — config file path (default: `.contagent.yaml`)
+- `CONTAGENT_CONFIG` — config file path (default: `$CONTAGENT_ROOT/.contagent.yaml`)
+- `CONTAGENT_ROOT` — project root (default: current directory)
 - `CONTAGENT_DOCKER_ARGS` — extra `docker run` arguments (shell-quoted string)
 - `CONTAGENT_EXTRA_GROUP_GIDS` — comma-separated supplementary GIDs applied at container startup
-- `CONTAGENT_CWD` — injected absolute container workdir; reserved for contagent
+
+Injected into the container (reserved; can't be set via `environment`):
+
+- `CONTAGENT_ROOT` — absolute project root
+- `CONTAGENT_CWD` — absolute container workdir (the launch directory)
+
+### Project root and workdir
+
+The project root holds `.contagent.yaml`, is bind-mounted at its host path,
+and is the base for relative volume paths. The container starts in the
+launch directory. These are the same unless `--root` is given, which lets
+you launch from a subdirectory of a project (or elsewhere) while keeping
+the project's config and mounts:
+
+```bash
+cd ~/src/myproject/some/subdir
+contagent --root ~/src/myproject pi
+```
+
+If the launch directory isn't under the root or another identity-mapped
+volume, it is bind-mounted at its host path too.
 
 ### `.contagent.yaml`
 
@@ -182,11 +204,11 @@ variables are never expanded.
 - **`name`** *(required)* — must match a feature name in the embedded config.
 - **`enabled`** — `true`/`false`; overrides the feature default. CLI `--<feature>`/`--no-<feature>` overrides this further.
 - **`volumes`** — replaces the embedded volume list entirely when present.
-  - **`path`** *(required)* — container mount target and default host source. Relative paths resolve against the launcher's working directory.
+  - **`path`** *(required)* — container mount target and default host source. Relative paths resolve against the project root.
   - **`source`** — host path when it differs from `path`. Missing sources under the mapped home or the project directory are created at launch; other sources must already exist.
   - **`read_only`** — mount read-only (default: `false`).
   - **`file`** — `true` if the path is a file; a zero-byte file is created if it doesn't exist (default: `false`).
-- **`environment`** — map of env vars injected when the feature is enabled; replaces the embedded map for that feature. Values are expanded but never path-resolved: a leading `./` passes through literally (with a warning), since it may be meant relative to the consumer's runtime cwd — use `${PWD}/...` for launch-dir-relative. Non-string values are skipped with a warning (unquoted `~` is YAML null — quote it).
+- **`environment`** — map of env vars injected when the feature is enabled; replaces the embedded map for that feature. Values are expanded but never path-resolved: a leading `./` passes through literally (with a warning), since it may be meant relative to the consumer's runtime cwd — use `${CONTAGENT_ROOT}/...` for root-relative or `${PWD}/...` for launch-dir-relative. Non-string values are skipped with a warning (unquoted `~` is YAML null — quote it).
 - **`ports`** — list of `docker --publish` port specs; replaces the embedded list for that feature.
 
 ## Hostbridge
