@@ -79,6 +79,8 @@ for (const f of features) {
   if (f.environment) rf.environment = f.environment;
   if (f.ports != null && !Array.isArray(f.ports)) die(`invalid ports in feature ${label}: must be a list`);
   if (f.ports?.length) rf.ports = f.ports;
+  if (f.docker_args != null && !Array.isArray(f.docker_args)) die(`invalid docker_args in feature ${label}: must be a list`);
+  if (f.docker_args?.length) rf.docker_args = f.docker_args;
   runtimeFeatures.push(rf);
 
   if (fpath) {

@@ -131,7 +131,7 @@ embedded defaults → .contagent.yaml (if present) → CLI flags
 - `--update-config` — apply feature flags to the config file and write it back; requires at least one flag
 - `--<feature>` / `--no-<feature>` — enable or disable a feature for this run
 - `--extra-groups <gid[,gid]>` — supplementary group GIDs; overrides `CONTAGENT_EXTRA_GROUP_GIDS`
-- `--docker-args <args>` — extra `docker run` arguments (shell-quoted string); overrides `CONTAGENT_DOCKER_ARGS`
+- `--docker-args <args>` — extra `docker run` arguments (shell-quoted string); overrides `CONTAGENT_DOCKER_ARGS`. Both are appended after config `docker_args`
 
 Environment variables:
 
@@ -192,6 +192,10 @@ features:
       BROWSER: /usr/local/bin/xdg-open
     ports:                  # docker --publish entries; replaces the embedded list
       - "7284:7284"
+
+  - name: base
+    docker_args:            # extra docker run args; replaces the embedded list
+      - --add-host=host.docker.internal:host-gateway
 ```
 
 **Field reference:**
@@ -211,6 +215,7 @@ variables are never expanded.
   - **`file`** — `true` if the path is a file; a zero-byte file is created if it doesn't exist (default: `false`).
 - **`environment`** — map of env vars injected when the feature is enabled; replaces the embedded map for that feature. Values are expanded but never path-resolved: a leading `./` passes through literally (with a warning), since it may be meant relative to the consumer's runtime cwd — use `${CONTAGENT_ROOT}/...` for root-relative or `${PWD}/...` for launch-dir-relative. Non-string values are skipped with a warning (unquoted `~` is YAML null — quote it).
 - **`ports`** — list of `docker --publish` port specs; replaces the embedded list for that feature.
+- **`docker_args`** — list of extra `docker run` arguments, one per item (no shell splitting), expanded like `environment` values; replaces the embedded list for that feature. Emitted before `--docker-args`/`CONTAGENT_DOCKER_ARGS`, so repeatable flags (`--add-host`, `--volume`) accumulate and single-value flags (`--shm-size`, `--network`) take the command-line value. Put project-wide args under `base`.
 
 ## Hostbridge
 
