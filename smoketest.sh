@@ -390,6 +390,8 @@ if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ]; then
     [ -n "${SSH_AUTH_SOCK:-}" ]
     [ -S "$SSH_AUTH_SOCK" ]
   '
+  run_step "ssh agent forwarding disabled" run_launcher_image "$CONTAGENT_IMAGE" --no-ssh-agent \
+    bash -c '[ -z "${SSH_AUTH_SOCK:-}" ]'
 else
   echo "[SKIP] ssh agent forwarding (host SSH_AUTH_SOCK unavailable)"
 fi

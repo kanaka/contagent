@@ -52,7 +52,7 @@ const dockerArgs = [], motd = [], labels = [], parts = [], runtimeFeatures = [];
 console.log('Building image with selected features:');
 for (const f of features) {
   const label = String(f.name || ''), fpath = f.path || '';
-  if (!label || !fpath) die('invalid manifest row');
+  if (!label) die('invalid manifest row');
   const names = [label, ...(f.aliases || []).map(String)];
 
   for (const n of names) unknown.delete(n);
@@ -81,9 +81,11 @@ for (const f of features) {
   if (f.ports?.length) rf.ports = f.ports;
   runtimeFeatures.push(rf);
 
-  const partPath = join(root, fpath);
-  if (!existsSync(partPath)) die(`missing Dockerfile part: ${fpath}`);
-  parts.push(readFileSync(partPath, 'utf8'));
+  if (fpath) {
+    const partPath = join(root, fpath);
+    if (!existsSync(partPath)) die(`missing Dockerfile part: ${fpath}`);
+    parts.push(readFileSync(partPath, 'utf8'));
+  }
 
   let value = 'builtin';
   const ver = f.version;

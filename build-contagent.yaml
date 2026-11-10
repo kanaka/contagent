@@ -241,6 +241,10 @@ features:
       default: latest
       resolve: ./voom-like-version.sh .
 
+  # Forwards the host SSH_AUTH_SOCK socket when present; launcher-only.
+  - name: ssh-agent
+    required: true
+
   - name: runtime
     path: Dockerfile-parts/runtime
     required: true
