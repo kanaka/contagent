@@ -1,0 +1,1 @@
+COPY .contagent-motd.generated /etc/contagent-motd

@@ -12,6 +12,7 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 print_motd_if_interactive() {
   [ -t 0 ] && [ -t 1 ] || return 0
+  [ "${CONTAGENT_MOTD:-}" = true ] || return 0
   [ -s /etc/contagent-motd ] || return 0
 
   cat /etc/contagent-motd
