@@ -293,7 +293,8 @@ Mounted by default:
   - `~/.contagent` -> `~/.contagent`
   - `~/.local/state/contagent` -> `~/.local/state/contagent`
   - `~/.cache/contagent` -> `/var/cache/contagent`
-- SSH agent socket when detected.
+- SSH agent socket when detected (`ssh-agent` feature; disable with `--no-ssh-agent`
+  or `enabled: false` in `.contagent.yaml`).
 
 Mounted only when enabled:
 
