@@ -301,6 +301,35 @@ test_environment_expansion_semantics() {
 }
 
 
+test_root_workdir_semantics() {
+  local tmp rc=0
+  # Physical path: the launcher resolves root and workdir through symlinks (macOS /var).
+  tmp=$(cd "$(mktemp -d)" && pwd -P)
+  mkdir -p "$tmp/project/sub" "$tmp/outside"
+  printf 'version: 2\nfeatures:\n  - {name: env, enabled: true}\n' >"$tmp/project/.contagent.yaml"
+
+  # Subdir: root config is found, relative volumes resolve to root, PWD follows workdir.
+  (cd "$tmp/project/sub" && HOME="$tmp/home" CONTAGENT_IMAGE="$img_cli" "$launcher" \
+    --root .. bash -lc '
+    set -e
+    test "$CONTAGENT_ROOT" = "'"$tmp/project"'"
+    test "$CONTAGENT_CWD" = "$PWD"
+    test "$PWD" = "'"$tmp/project/sub"'"
+    test "$SMOKE_PWD" = "$PWD"
+    test -d "$CONTAGENT_ROOT/.smoke-env-tmp"
+  ' >/dev/null 2>&1) \
+    && [ -d "$tmp/project/.smoke-env-tmp" ] && [ ! -e "$tmp/project/sub/.smoke-env-tmp" ] || rc=1
+
+  # Outside root: workdir is mounted separately.
+  (cd "$tmp/outside" && HOME="$tmp/home" CONTAGENT_IMAGE="$img_cli" CONTAGENT_ROOT="$tmp/project" \
+    "$launcher" bash -lc 'test "$PWD" = "'"$tmp/outside"'" && touch marker' >/dev/null 2>&1) \
+    && [ -e "$tmp/outside/marker" ] || rc=1
+
+  rm -rf "$tmp"
+  return "$rc"
+}
+
+
 cleanup() {
   if [ "${#temp_images[@]}" -gt 0 ]; then
     docker image rm -f "${temp_images[@]}" >/dev/null 2>&1 || true
@@ -373,8 +402,9 @@ run_step "unknown option error" test_unknown_option
 run_step "source mount create-if-missing behavior" test_source_create_semantics
 run_step "default off toggle behavior" test_default_off_toggle_semantics
 run_step "overlapping feature volumes coalesce" test_overlapping_volume_feature_semantics
-run_step "relative volume sources resolve from launcher cwd" test_relative_volume_source_semantics
+run_step "relative volume sources resolve from project root" test_relative_volume_source_semantics
 run_step "environment expansion semantics" test_environment_expansion_semantics
+run_step "project root vs workdir" test_root_workdir_semantics
 
 run_step "claude cli availability" run_in_launcher 'command -v claude >/dev/null && claude --version >/dev/null || true'
 run_step "opencode cli availability" run_in_launcher 'command -v opencode >/dev/null && opencode --version >/dev/null || true'

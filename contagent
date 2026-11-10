@@ -7,7 +7,8 @@ const YAML = require("yaml");
 const USAGE = `Usage: ./contagent [options] [--] [command ...]
 
 Options:
-  -c, --config CONFIG         Runtime config path (default: .contagent.yaml)
+  -c, --config CONFIG         Runtime config path (default: ROOT/.contagent.yaml)
+  --root DIR                  Project root (default: cwd); cwd stays the workdir
   --show-config               Print effective config and exit
   --update-config             Apply feature flags and write config file
   --<feature>                 Enable a feature
@@ -23,6 +24,7 @@ const die = (msg) => { console.error(`ERROR: ${msg}`); process.exit(1); };
 const warn = (msg) => console.error(`WARN: ${msg}`);
 const id = (f) => cp.execFileSync("id", [f], { encoding: "utf8" }).trim();
 const isSocket = (p) => { try { return fs.statSync(p).isSocket(); } catch { return false; } };
+const under = (p, dir) => p === dir || p.startsWith(dir + path.sep);
 function shellSplit(s) {
   const args = [];
   let cur = "", inSingle = false, inDouble = false, esc = false;
@@ -85,7 +87,7 @@ function parseArgs(argv, featureNames) {
   const flags = new Map();
   let dockerArgs = null;
   let extraGroups = null;
-  let configFile = null, showConfig = false, updateConfig = false, help = false;
+  let configFile = null, root = null, showConfig = false, updateConfig = false, help = false;
   let command = [], i = 0;
   while (i < argv.length) {
     const a = argv[i++];
@@ -95,6 +97,8 @@ function parseArgs(argv, featureNames) {
     if (a === "--update-config") { updateConfig = true; continue; }
     if (a === "-c" || a === "--config") { configFile = argv[i++] || die("-c requires a value"); continue; }
     if (a.startsWith("--config=")) { configFile = a.slice("--config=".length); continue; }
+    if (a === "--root") { root = argv[i++] || die("--root requires a value"); continue; }
+    if (a.startsWith("--root=")) { root = a.slice("--root=".length); continue; }
     if (a === "--docker-args") { dockerArgs = argv[i++] || die("--docker-args requires a value"); continue; }
     if (a.startsWith("--docker-args=")) { dockerArgs = a.slice("--docker-args=".length); continue; }
     if (a === "--extra-groups") { extraGroups = argv[i++] || die("--extra-groups requires a value"); continue; }
@@ -104,16 +108,17 @@ function parseArgs(argv, featureNames) {
     if (a.startsWith("-")) die(`unknown option: ${a}`);
     command = argv.slice(i - 1); break;
   }
-  configFile = configFile ?? process.env.CONTAGENT_CONFIG ?? ".contagent.yaml";
+  root = root ?? process.env.CONTAGENT_ROOT ?? ".";
+  try { root = fs.realpathSync(root); } catch { die(`root not found: ${root}`); }
+  configFile = configFile ?? process.env.CONTAGENT_CONFIG ?? path.join(root, ".contagent.yaml");
   dockerArgs = dockerArgs ?? process.env.CONTAGENT_DOCKER_ARGS ?? "";
   extraGroups = extraGroups ?? process.env.CONTAGENT_EXTRA_GROUP_GIDS ?? "";
-  return { configFile, command, showConfig, updateConfig, help, extraGroups, flags, dockerArgs };
+  return { configFile, root, command, showConfig, updateConfig, help, extraGroups, flags, dockerArgs };
 }
 
 // ---------- volumes ----------
 
 function mountPlan(features, vars, base) {
-  const under = (p, dir) => p === dir || p.startsWith(dir + path.sep);
   const targets = new Map();
   for (const f of features) {
     if (!f.enabled || !f.volumes) continue;
@@ -191,7 +196,8 @@ function main() {
   }
 
   // Docker args
-  const args = ["run", "--rm", "--workdir", cwd, "--volume", `${cwd}:${cwd}`];
+  const root = p.root;
+  const args = ["run", "--rm", "--workdir", cwd];
   if (process.stdin.isTTY && process.stdout.isTTY) args.push("--interactive", "--tty");
 
   const identity = {
@@ -200,6 +206,7 @@ function main() {
     CONTAGENT_UID: id("-u"),
     CONTAGENT_GID: id("-g"),
     CONTAGENT_HOME: home,
+    CONTAGENT_ROOT: root,
     CONTAGENT_CWD: cwd,
   };
   // Expansion vocabulary is exactly what contagent injects; host env never leaks.
@@ -210,28 +217,35 @@ function main() {
     ...(process.env.COLORTERM ? [["COLORTERM", process.env.COLORTERM]] : []),
   ];
   for (const f of features) if (f.enabled) for (let [k, v] of Object.entries(f.environment || {})) {
-    if (k === "CONTAGENT_CWD") die("CONTAGENT_CWD is reserved");
+    if (k === "CONTAGENT_ROOT" || k === "CONTAGENT_CWD") die(`${k} is reserved`);
     if (typeof v === "number" || typeof v === "boolean") v = String(v);
     if (typeof v !== "string") { warn(`feature ${f.name}: ignoring non-string environment value for ${k} (unquoted ~ is YAML null)`); continue; }
     if (v.startsWith("./") || v.startsWith("../"))
-      warn(`feature ${f.name}: ${k} is passed literally; use \${PWD}/... for a launch-dir-relative path`);
+      warn(`feature ${f.name}: ${k} is passed literally; use \${CONTAGENT_ROOT}/... for a root-relative path`);
     envs.push([k, expandValue(v, expandVars)]);
   }
   for (const f of features) if (f.enabled) for (const p of f.ports || []) args.push("--publish", String(p));
   for (const [k, v] of envs) args.push("--env", `${k}=${v}`);
 
-  const { specs, gids } = mountPlan(features, expandVars, cwd);
-  for (const s of specs) args.push("--volume", s);
+  const { specs, gids } = mountPlan(features, expandVars, root);
+  const mounts = [`${root}:${root}`, ...specs].map(s => {
+    const ro = s.endsWith(":ro");
+    const [src, tgt] = (ro ? s.slice(0, -3) : s).split(":");
+    return { src, tgt, ro };
+  });
+  // The workdir must be visible at its host path: its deepest covering mount must be identity.
+  const cover = mounts.filter(m => under(cwd, m.tgt)).sort((a, b) => b.tgt.length - a.tgt.length)[0];
+  if (!cover || cover.src !== cover.tgt) mounts.push({ src: cwd, tgt: cwd });
   // Images built before ssh-agent was a feature lack it; keep forwarding there.
   const sshOn = features.find(f => f.name === "ssh-agent")?.enabled ?? true;
   const ssh = sshOn ? process.env.SSH_AUTH_SOCK || "" : "";
-  const sshOk = ssh && isSocket(ssh);
-  if (sshOk) args.push("--volume", `${ssh}:${ssh}`, "--env", `SSH_AUTH_SOCK=${ssh}`);
-  else if (sshOn) warn("SSH agent not available; SSH auth forwarding disabled");
+  if (ssh && isSocket(ssh)) {
+    mounts.push({ src: ssh, tgt: ssh });
+    args.push("--env", `SSH_AUTH_SOCK=${ssh}`);
+  } else if (sshOn) warn("SSH agent not available; SSH auth forwarding disabled");
 
-  for (const s of [`${cwd}:${cwd}`, ...specs, ...(sshOk ? [`${ssh}:${ssh}`] : [])]) {
-    const ro = s.endsWith(":ro");
-    const [src, tgt] = (ro ? s.slice(0, -3) : s).split(":");
+  for (const { src, tgt, ro } of mounts) {
+    args.push("--volume", `${src}:${tgt}${ro ? ":ro" : ""}`);
     console.error(`[volumes] ${src}${src === tgt ? "" : ` -> ${tgt}`}${ro ? " (ro)" : ""}`);
   }
 
@@ -241,7 +255,7 @@ function main() {
 
   const hb = features.find(f => f.name === "hostbridge")?.enabled;
   if (hb) {
-    require("./hostbridge.js").start({ logFile: ".hostbridge-log" }).then(({ port, shutdown }) => {
+    require("./hostbridge.js").start({ logFile: path.join(root, ".hostbridge-log") }).then(({ port, shutdown }) => {
       args.push("--env", `HOSTBRIDGE_PORT=${port}`);
       run(args, image, p.command, shutdown);
     }).catch(e => die(e.message));
