@@ -24,6 +24,11 @@ exec_as_user() {
   fi
   [ "$#" -eq 2 ] && [ "$1" = bash ] && [ "$2" = -l ] && print_motd_if_interactive
 
+  # Load the mise environment so direct commands (not just shells) see mise tools.
+  case ",${CONTAGENT_ENABLED_FEATURES:-}," in *,mise,*)
+    set -- bash -c 'eval "$(mise hook-env -s bash -q)"; exec "$@"' bash "$@" ;;
+  esac
+
   # Keep docker exec behavior deterministic: always set HOME/USER for mapped identity.
   exec runuser -u "$CONTAGENT_USERNAME" -- env \
     HOME="$CONTAGENT_HOME" \

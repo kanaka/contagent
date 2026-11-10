@@ -213,11 +213,12 @@ function main() {
   const expandVars = { ...identity, HOME: home, PWD: cwd, USER: identity.CONTAGENT_USERNAME };
   const envs = [
     ...Object.entries(identity),
+    ["CONTAGENT_ENABLED_FEATURES", features.filter(f => f.enabled).map(f => f.name).join(",")],
     ...(process.env.TERM ? [["TERM", process.env.TERM]] : []),
     ...(process.env.COLORTERM ? [["COLORTERM", process.env.COLORTERM]] : []),
   ];
   for (const f of features) if (f.enabled) for (let [k, v] of Object.entries(f.environment || {})) {
-    if (k === "CONTAGENT_ROOT" || k === "CONTAGENT_CWD") die(`${k} is reserved`);
+    if (["CONTAGENT_ROOT", "CONTAGENT_CWD", "CONTAGENT_ENABLED_FEATURES"].includes(k)) die(`${k} is reserved`);
     if (typeof v === "number" || typeof v === "boolean") v = String(v);
     if (typeof v !== "string") { warn(`feature ${f.name}: ignoring non-string environment value for ${k} (unquoted ~ is YAML null)`); continue; }
     if (v.startsWith("./") || v.startsWith("../"))

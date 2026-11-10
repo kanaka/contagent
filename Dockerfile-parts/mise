@@ -9,3 +9,10 @@ RUN arch=$(dpkg --print-architecture) \
     && version="$MISE_VERSION" \
     && curl -fsSL "https://github.com/jdx/mise/releases/download/v${version}/mise-v${version}-linux-${mise_arch}" -o /usr/local/bin/mise \
     && chmod 0755 /usr/local/bin/mise
+
+# Debian's /etc/profile resets PATH for login shells, discarding what the
+# entrypoint loaded; activate re-applies it and tracks cd.
+RUN printf '%s\n' \
+      '[ -n "$BASH_VERSION" ] || return 0' \
+      'case ",${CONTAGENT_ENABLED_FEATURES:-}," in *,mise,*) eval "$(mise activate bash)" ;; esac' \
+    > /etc/profile.d/mise.sh
