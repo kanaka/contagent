@@ -107,7 +107,9 @@ Feature mounts are defined in each feature's `volumes` list. Build embeds a defa
 Build implementation notes:
 
 - Build composition is driven by `build-contagent.yaml` and assembled from
-  `Dockerfile-parts/` into `.Dockerfile.generated` on each build (`base` is always included).
+  `Dockerfile-parts/` into `.Dockerfile.generated` on each build (`base`, `motd`, and `runtime` are always included).
+- The `motd` feature prints tool versions on interactive login. Hush it with
+  `--no-motd` or `enabled: false` in `.contagent.yaml`.
 - Manifest parsing uses local `yq` when available, otherwise `mikefarah/yq` via Docker.
 - The generated image contains the default runtime config for the selected features.
 
