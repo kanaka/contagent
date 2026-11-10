@@ -343,7 +343,7 @@ test_docker_args_semantics() {
     set -e
     grep -q "cfg\.smoke" /etc/hosts
     grep -q "cli\.smoke" /etc/hosts
-    ! grep -q "off\.smoke" /etc/hosts
+    if grep -q "off\.smoke" /etc/hosts; then exit 1; fi
     test "$SMOKE_DA" = "$CONTAGENT_ROOT/x"
   ' >/dev/null 2>&1) || rc=1
 

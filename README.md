@@ -215,7 +215,7 @@ variables are never expanded.
   - **`file`** — `true` if the path is a file; a zero-byte file is created if it doesn't exist (default: `false`).
 - **`environment`** — map of env vars injected when the feature is enabled; replaces the embedded map for that feature. Values are expanded but never path-resolved: a leading `./` passes through literally (with a warning), since it may be meant relative to the consumer's runtime cwd — use `${CONTAGENT_ROOT}/...` for root-relative or `${PWD}/...` for launch-dir-relative. Non-string values are skipped with a warning (unquoted `~` is YAML null — quote it).
 - **`ports`** — list of `docker --publish` port specs; replaces the embedded list for that feature.
-- **`docker_args`** — list of extra `docker run` arguments, one per item (no shell splitting), expanded like `environment` values; replaces the embedded list for that feature. Emitted before `--docker-args`/`CONTAGENT_DOCKER_ARGS`, so repeatable flags (`--add-host`, `--volume`) accumulate and single-value flags (`--shm-size`, `--network`) take the command-line value. Put project-wide args under `base`.
+- **`docker_args`** — list of extra `docker run` arguments, one per item (no shell splitting), expanded like `environment` values; replaces the embedded list for that feature. Emitted before `--docker-args`/`CONTAGENT_DOCKER_ARGS`, so repeatable flags (`--add-host`, `--volume`) accumulate and single-value flags (`--shm-size`, `--memory`) take the command-line value; otherwise Docker's own rules for repeated flags apply (e.g. two `--network` flags attach both networks or conflict). Put project-wide args under `base`.
 
 ## Hostbridge
 
