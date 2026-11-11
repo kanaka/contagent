@@ -1,0 +1,10 @@
+ARG PLAYWRIGHT_VERSION=latest
+
+RUN if [ "$PLAYWRIGHT_VERSION" = latest ]; then \
+      npm install -g playwright; \
+    else \
+      npm install -g "playwright@${PLAYWRIGHT_VERSION}"; \
+    fi \
+    && playwright install-deps chromium firefox webkit \
+    && npm uninstall -g playwright \
+    && rm -rf /var/lib/apt/lists/*
