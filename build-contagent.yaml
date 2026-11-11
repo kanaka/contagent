@@ -245,13 +245,6 @@ features:
   - name: ssh-agent
     required: true
 
-  - name: motd
-    path: Dockerfile-parts/motd
-    required: true
-    environment:
-      # Disable the feature to hush the login banner.
-      CONTAGENT_MOTD: "true"
-
   - name: runtime
     path: Dockerfile-parts/runtime
     required: true

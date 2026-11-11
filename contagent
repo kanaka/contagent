@@ -15,6 +15,7 @@ Options:
   --no-<feature>              Disable a feature
   --docker-args <args>        Extra docker run args (shell-quoted string)
   --extra-groups <gid[,gid]>  Supplementary group GIDs
+  --verbose                   List mounts and show the login banner
   -h, --help                  Show this help
 `;
 
@@ -85,7 +86,7 @@ function parseArgs(argv, featureNames) {
   const flags = new Map();
   let dockerArgs = null;
   let extraGroups = null;
-  let configFile = null, root = null, showConfig = false, updateConfig = false, help = false;
+  let configFile = null, root = null, showConfig = false, updateConfig = false, help = false, verbose = null;
   let command = [], i = 0;
   while (i < argv.length) {
     const a = argv[i++];
@@ -93,6 +94,7 @@ function parseArgs(argv, featureNames) {
     if (a === "-h" || a === "--help") { help = true; break; }
     if (a === "--show-config") { showConfig = true; continue; }
     if (a === "--update-config") { updateConfig = true; continue; }
+    if (a === "--verbose") { verbose = true; continue; }
     if (a === "-c" || a === "--config") { configFile = argv[i++] || die("-c requires a value"); continue; }
     if (a.startsWith("--config=")) { configFile = a.slice("--config=".length); continue; }
     if (a === "--root") { root = argv[i++] || die("--root requires a value"); continue; }
@@ -111,7 +113,8 @@ function parseArgs(argv, featureNames) {
   configFile = configFile ?? process.env.CONTAGENT_CONFIG ?? path.join(root, ".contagent.yaml");
   dockerArgs = dockerArgs ?? process.env.CONTAGENT_DOCKER_ARGS ?? "";
   extraGroups = extraGroups ?? process.env.CONTAGENT_EXTRA_GROUP_GIDS ?? "";
-  return { configFile, root, command, showConfig, updateConfig, help, extraGroups, flags, dockerArgs };
+  verbose = verbose ?? !["", "0", "false"].includes(process.env.CONTAGENT_VERBOSE ?? "");
+  return { configFile, root, command, showConfig, updateConfig, help, extraGroups, flags, dockerArgs, verbose };
 }
 
 // ---------- volumes ----------
@@ -212,6 +215,7 @@ function main() {
     ["CONTAGENT_ENABLED_FEATURES", features.filter(f => f.enabled).map(f => f.name).join(",")],
     ...(process.env.TERM ? [["TERM", process.env.TERM]] : []),
     ...(process.env.COLORTERM ? [["COLORTERM", process.env.COLORTERM]] : []),
+    ...(p.verbose ? [["CONTAGENT_MOTD", "true"]] : []),
   ];
   for (const f of features) if (f.enabled) for (let [k, v] of Object.entries(f.environment || {})) {
     if (["CONTAGENT_ROOT", "CONTAGENT_CWD", "CONTAGENT_ENABLED_FEATURES"].includes(k)) die(`${k} is reserved`);
@@ -243,7 +247,7 @@ function main() {
 
   for (const { src, tgt, ro } of mounts) {
     args.push("--volume", `${src}:${tgt}${ro ? ":ro" : ""}`);
-    console.error(`[volumes] ${src}${src === tgt ? "" : ` -> ${tgt}`}${ro ? " (ro)" : ""}`);
+    if (p.verbose) console.error(`[volumes] ${src}${src === tgt ? "" : ` -> ${tgt}`}${ro ? " (ro)" : ""}`);
   }
 
   const groups = extraGroupSpecs([p.extraGroups, ...gids].filter(Boolean).join(","));

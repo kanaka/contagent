@@ -107,9 +107,7 @@ Feature mounts are defined in each feature's `volumes` list. Build embeds a defa
 Build implementation notes:
 
 - Build composition is driven by `build-contagent.yaml` and assembled from
-  `Dockerfile-parts/` into `.Dockerfile.generated` on each build (`base`, `motd`, and `runtime` are always included).
-- The `motd` feature prints tool versions on interactive login. Hush it with
-  `--no-motd` or `enabled: false` in `.contagent.yaml`.
+  `Dockerfile-parts/` into `.Dockerfile.generated` on each build (`base` and `runtime` are always included).
 - Manifest parsing uses local `yq` when available, otherwise `mikefarah/yq` via Docker.
 - The generated image contains the default runtime config for the selected features.
 
@@ -130,6 +128,7 @@ embedded defaults → .contagent.yaml (if present) → CLI flags
 - `--show-config` — print the fully merged effective config and exit
 - `--update-config` — apply feature flags to the config file and write it back; requires at least one flag
 - `--<feature>` / `--no-<feature>` — enable or disable a feature for this run
+- `--verbose` — list mounts and print the tool-version banner on interactive login; overrides `CONTAGENT_VERBOSE`. Startup is quiet by default
 - `--extra-groups <gid[,gid]>` — supplementary group GIDs; overrides `CONTAGENT_EXTRA_GROUP_GIDS`
 - `--docker-args <args>` — extra `docker run` arguments (shell-quoted string); overrides `CONTAGENT_DOCKER_ARGS`. Both are appended after config `docker_args`
 
@@ -140,6 +139,7 @@ Environment variables:
 - `CONTAGENT_ROOT` — project root (default: current directory)
 - `CONTAGENT_DOCKER_ARGS` — extra `docker run` arguments (shell-quoted string)
 - `CONTAGENT_EXTRA_GROUP_GIDS` — comma-separated supplementary GIDs applied at container startup
+- `CONTAGENT_VERBOSE` — set (to anything but `0` or `false`) to behave as if `--verbose` were given
 
 Injected into the container (reserved; can't be set via `environment`):
 
