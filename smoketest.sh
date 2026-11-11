@@ -98,6 +98,17 @@ run_in_launcher() {
 }
 
 
+test_verbose_semantics() {
+  local cfg err
+  cfg=$(config_for_image "$CONTAGENT_IMAGE")
+  err=$(CONTAGENT_IMAGE="$CONTAGENT_IMAGE" CONTAGENT_VERBOSE= "$launcher" --config "$cfg" \
+    bash -c 'test -z "${CONTAGENT_MOTD:-}"' 2>&1 >/dev/null) \
+    && ! grep -q '^\[volumes\]' <<<"$err" || return 1
+  err=$(CONTAGENT_IMAGE="$CONTAGENT_IMAGE" "$launcher" --config "$cfg" --verbose \
+    bash -c 'test "$CONTAGENT_MOTD" = true' 2>&1 >/dev/null) \
+    && grep -q '^\[volumes\]' <<<"$err"
+}
+
 run_in_launcher_with_docker_socket() {
   CONTAGENT_IMAGE="$CONTAGENT_IMAGE" "$launcher" \
     --config "$(config_for_image "$CONTAGENT_IMAGE")" --docker bash -lc "set -e; $1"
@@ -421,6 +432,7 @@ run_step "docker daemon reachable" run_in_launcher_with_docker_socket 'docker ps
 
 run_step "dynamic show-config output" test_show_config_dynamic
 run_step "unknown option error" test_unknown_option
+run_step "quiet by default, --verbose lists mounts" test_verbose_semantics
 run_step "source mount create-if-missing behavior" test_source_create_semantics
 run_step "default off toggle behavior" test_default_off_toggle_semantics
 run_step "overlapping feature volumes coalesce" test_overlapping_volume_feature_semantics
