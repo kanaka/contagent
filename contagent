@@ -65,17 +65,15 @@ function loadUserConfig(file) {
   } catch (e) { die(`failed to parse ${file}: ${e.message}`); }
 }
 
+// Per-feature fields a .contagent.yaml override replaces wholesale.
+const OVERRIDE_FIELDS = ["enabled", "volumes", "environment", "ports", "docker_args"];
+
 function mergeConfig(embedded, user, flags) {
   const overrides = new Map((user?.features || []).filter(f => f.name).map(f => [f.name, f]));
   return embedded.features.map(ef => {
     const mf = { ...ef };
     const uf = overrides.get(ef.name);
-    if (uf) {
-      if ('enabled' in uf) mf.enabled = uf.enabled;
-      if ('volumes' in uf) mf.volumes = uf.volumes;
-      if ('environment' in uf) mf.environment = uf.environment;
-      if ('ports' in uf) mf.ports = uf.ports;
-    }
+    if (uf) for (const k of OVERRIDE_FIELDS) if (k in uf) mf[k] = uf[k];
     if (flags.has(mf.name)) mf.enabled = flags.get(mf.name);
     return mf;
   });
@@ -184,10 +182,8 @@ function main() {
     if (!p.flags.size) die("--update-config requires feature flags");
     const diff = features.filter(mf => {
       const ef = embedded.features.find(f => f.name === mf.name);
-      return p.flags.has(mf.name) || !ef || mf.enabled !== ef.enabled
-        || JSON.stringify(mf.volumes) !== JSON.stringify(ef.volumes)
-        || JSON.stringify(mf.environment) !== JSON.stringify(ef.environment)
-        || JSON.stringify(mf.ports) !== JSON.stringify(ef.ports);
+      return p.flags.has(mf.name) || !ef
+        || OVERRIDE_FIELDS.some(k => JSON.stringify(mf[k]) !== JSON.stringify(ef[k]));
     });
     fs.mkdirSync(path.dirname(p.configFile), { recursive: true });
     fs.writeFileSync(p.configFile, YAML.stringify({ version: VERSION, features: diff }));
@@ -252,6 +248,8 @@ function main() {
 
   const groups = extraGroupSpecs([p.extraGroups, ...gids].filter(Boolean).join(","));
   if (groups) args.push("--env", `CONTAGENT_EXTRA_GROUP_SPECS=${groups}`);
+  // Config docker_args first, so CLI/env args can add to or override them.
+  for (const f of features) if (f.enabled) for (const a of f.docker_args || []) args.push(expandValue(String(a), expandVars));
   if (p.dockerArgs) args.push(...shellSplit(p.dockerArgs));
 
   const hb = features.find(f => f.name === "hostbridge")?.enabled;

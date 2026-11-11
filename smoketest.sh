@@ -329,6 +329,28 @@ test_root_workdir_semantics() {
   return "$rc"
 }
 
+test_docker_args_semantics() {
+  local tmp rc=0
+  tmp=$(cd "$(mktemp -d)" && pwd -P)
+  mkdir -p "$tmp/project"
+  printf '%s\n' 'version: 2' 'features:' \
+    '  - {name: inc, docker_args: ["--add-host=cfg.smoke:10.1.2.3", "--env=SMOKE_DA=${CONTAGENT_ROOT}/x"]}' \
+    '  - {name: offfeat, docker_args: ["--add-host=off.smoke:10.6.6.6"]}' >"$tmp/project/.contagent.yaml"
+
+  # Config args are expanded and gated by feature; CLI/env args are appended, not substituted.
+  (cd "$tmp/project" && HOME="$tmp/home" CONTAGENT_IMAGE="$img_cli" "$launcher" \
+    --docker-args '--add-host=cli.smoke:10.9.9.9' bash -c '
+    set -e
+    grep -q "cfg\.smoke" /etc/hosts
+    grep -q "cli\.smoke" /etc/hosts
+    if grep -q "off\.smoke" /etc/hosts; then exit 1; fi
+    test "$SMOKE_DA" = "$CONTAGENT_ROOT/x"
+  ' >/dev/null 2>&1) || rc=1
+
+  rm -rf "$tmp"
+  return "$rc"
+}
+
 
 cleanup() {
   if [ "${#temp_images[@]}" -gt 0 ]; then
@@ -405,6 +427,7 @@ run_step "overlapping feature volumes coalesce" test_overlapping_volume_feature_
 run_step "relative volume sources resolve from project root" test_relative_volume_source_semantics
 run_step "environment expansion semantics" test_environment_expansion_semantics
 run_step "project root vs workdir" test_root_workdir_semantics
+run_step "docker_args merge with --docker-args" test_docker_args_semantics
 
 run_step "claude cli availability" run_in_launcher 'command -v claude >/dev/null && claude --version >/dev/null || true'
 run_step "opencode cli availability" run_in_launcher 'command -v opencode >/dev/null && opencode --version >/dev/null || true'
