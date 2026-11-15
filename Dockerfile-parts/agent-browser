@@ -23,7 +23,7 @@ RUN npm install -g \
 #    Track: https://github.com/vercel-labs/agent-browser/issues/248
 #    Check: agent-browser install succeeds on an arm64 host.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends chromium \
+    && apt-get install -y --no-install-recommends chromium libnss3-tools \
     && rm -rf /var/lib/apt/lists/* \
     && ARCH=$(dpkg --print-architecture) \
     && case "$ARCH" in arm64) P=linux-arm64;; amd64) P=linux64;; *) echo "unsupported: $ARCH" >&2; exit 1;; esac \
